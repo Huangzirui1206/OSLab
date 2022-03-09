@@ -1,0 +1,39 @@
+use instrction "as" to transform .s file to binary file
+To complete the valid format of mbr, the references are as below:
+https://blog.csdn.net/qq_33873431/article/details/112206282
+/*
+msg: db "hello world, welcome to OS!"
+msgLen: equ $ - msg           ; 字符串长度
+times 510 - ($ - $$) db 0     ; 填充剩余部分，到512字节
+dw 0aa55h                     ; 魔数，必须有这两个字节BIOS才确认是MBR，即主引导记录（是装有Linux系统的硬盘的第一个扇区）
+*/
+
+nasm 伪操作
+$-$$：经常被用到，表示本行距离程序开始处的相对距离。
+times：重复汇编，在times后跟着的表达式会被重复汇编指定次数。
+db定义字节类型变量，一个字节数据占1个字节单元，读完一个，偏移量加1
+dw定义字类型变量，一个字数据占2个字节单元，读完一个，偏移量加2
+dd定义双字类型变量，一个双字数据占4个字节单元，读完一个，偏移量加4
+
+编译
+nasm boot.asm -o boot.bin
+
+现在解释一下。
+
+NASM 和 GAS 之间最大的差异之一是语法。GAS 使用 AT&T 语法，这是一种相当老的语法，由 GAS 和一些老式汇编器使用；NASM 使用 Intel 语法，大多数汇编器都支持它，包括 TASM 和 MASM。（GAS 的现代版本支持 .intel_syntax 指令，因此允许在 GAS 中使用 Intel 语法。）
+
+下面是从 GAS 手册总结出的一些主要差异：
+
+AT&T 和 Intel 语法采用相反的源和目标操作数次序。例如：
+Intel：mov eax, 4
+AT&T：movl $4, %eax
+在 AT&T 语法中，中间操作数前面加 $；在 Intel 语法中，中间操作数不加前缀。例如：
+Intel：push 4
+AT&T：pushl $4
+在 AT&T 语法中，寄存器操作数前面加 %。在 Intel 语法中，它们不加前缀。
+在 AT&T 语法中，内存操作数的大小由操作码名称的最后一个字符决定。操作码后缀 b、w 和 l 分别指定字节（8 位）、字（16 位）和长（32 位）内存引用。Intel 语法通过在内存操作数（而不是操作码本身）前面加 byte ptr、word ptr 和 dword ptr 来指定大小。所以：
+Intel：mov al, byte ptr foo
+AT&T：movb foo, %al
+在 AT&T 语法中，中间形式长跳转和调用是 lcall/ljmp $section, $offset；Intel 语法是 call/jmp far section:offset。在 AT&T 语法中，远返回指令是 lret $stack-adjust，而 Intel 使用 ret far stack-adjust。
+
+reference: https://blog.csdn.net/chinalinuxzend/article/details/1875948

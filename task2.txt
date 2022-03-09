@@ -1,0 +1,19 @@
+EXERCISE 13:
+cat is short for catenate.
+The command line "cat bootloader/bootloader.bin app/app.bin > os.img" means:
+catenate the two .bin files to a while and print it to os.img
+If we do some changes to the Makefile, we can get a cat.bin file with the cat result. Then just hexdump it. It's easy to find the cat.bin is the combination of the origin .bin files, with app.bin directly following bootloader.bin.
+As a result, if we view cat.bin as a simulation of disk, the bootloader.bin is sector 0 and app.bin is sector 1, which is important to implement boot.c.
+
+
+EXERCISE 14:
+No.
+The BIOS is start from 0x7c00 and occupies 512 bytes.
+According to objdump and ls -al, we find app.bin is 58 bytes.
+But the readSect function read in 512 bytes, and it will cover itself with noncode, so the function won't work.
+
+
+EXERCISE 15:
+reference :
+The experiment guide 
+https://www.cnblogs.com/ronny/p/7787259.html

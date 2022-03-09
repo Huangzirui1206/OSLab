@@ -18,8 +18,10 @@ start:
 	data32 addr32 lgdt gdtDesc 
 
 	# TODO: 把cr0的最低位设置为1
-
-
+	# Set PE bit incr0 to start protect mode
+        movl %cr0, %eax
+        orb $0x1, %al
+        movl %eax, %cr0
 
 	# 长跳转切换到保护模式
 	data32 ljmp $0x08, $start32 
@@ -36,10 +38,10 @@ start32:
 	movl $0x8000, %eax # setting esp
 	movl %eax, %esp
 
-	# TODO：跳转到jmp
-
-
-
+	# TODO：跳转到bootMain
+	jmp bootMain
+loop32:
+	jmp loop32
 
 .p2align 2
 gdt: 
@@ -52,16 +54,16 @@ gdt:
 	.byte 0,0,0,0
 
 	# TODO：代码段描述符，对应cs
-	.word
-	.byte 
+	.word 0xffff, 0
+	.byte 0,0x9a,0xcf,0
 
 	# TODO：数据段描述符，对应ds
-	.word
-	.byte 
+	.word 0xffff,0
+	.byte 0,0x92,0xcf,0
 
 	# TODO：图像段描述符，对应gs
-	.word
-	.byte 
+	.word 0xffff,0x8000
+	.byte 0x0b,0x92,0xcf,0
 
 
 gdtDesc: 

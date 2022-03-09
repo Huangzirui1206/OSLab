@@ -1,6 +1,8 @@
 os.img:
 	cd bootloader; make bootloader.bin
 	cd app; make app.bin
+	# for debug
+	cat bootloader/bootloader.bin app/app.bin > cat.bin
 	cat bootloader/bootloader.bin app/app.bin > os.img
 
 clean:

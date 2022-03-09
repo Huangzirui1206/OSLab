@@ -1,0 +1,37 @@
+Q:Why the first descriptor in GDT is always a NULL descriptor?
+A:接下来我们就来看一下在汇编代码中定义GDT的方法。Intel处理器规定GDT中的第一个描述符必须是空描述符，这是因为寄存器和内存单元的初始值一般都是0，如果程序设计有问题，就会无意中用全0的索引来选择描述符，gdt_null的作用就有点像C语言中的空指针。
+reference:
+https://zhuanlan.zhihu.com/p/412845339#:~:text=Intel%E5%A4%84%E7%90%86%E5%99%A8,%E8%AF%AD%E8%A8%80%E4%B8%AD%E7%9A%84%E7%A9%BA%E6%8C%87%E9%92%88%E3%80%82
+
+
+Q:What is A20 wire?
+A:当ibm pc at系统被制造出来时，新的286处理器以及以后版本和旧有x86处理器并不兼容。旧的X86处理器（Intel 8086）有20位地址总线，这样可以访问最高1M内存。而386和以后版本有32地址总线，这样可以访问最高4G的内存。但是旧的8086处理器没有这么大的地址总线。为了保持兼容性Intel在地址线的第20位上制造了一个逻辑OR门，以便可以开启或关闭超过20位的地址总线。这样，为了兼容旧的处理器，在机器开启时A20被禁止的。
+reference:
+https://www.cnblogs.com/mqmelon/p/4790820.html
+
+
+EXERCISE 10:
+	# 长跳转切换到保护模式
+        # During the ljmp, index of cs is set to 1
+        data32 ljmp $0x08, $start32	
+
+        movw $0x10, %ax # setting data segment selector
+        movw %ax, %ds   #index in ds is 2
+        movw %ax, %es
+        movw %ax, %fs
+        movw %ax, %ss
+        movw $0x18, %ax # setting graphics data segment selector
+        movw %ax, %gs   #index in gs is 3
+        movl $0x8000, %eax # setting esp
+        movl %eax, %esp
+This code section can answer the question.
+We firstly set the index in cs, ds and gs to find the correct descriptor.
+And it's worth mentioning that cs is set by ljmp instrution since it can't be set directly.
+Another trap is that the graphic segment starts at 0x8b000, so the base in ds descriptor should be 0x8b000.
+
+
+EXERCISE 12:
+The string address is stored in ebx.
+The lenth of string is stored in ecx.
+The edi holds the offset from the base of VGA section, whose base, stored in the descriptor gs points to, is 0x8b000;
+In the loop of nextChar, edi increases by 2 every time because the VGA memory is 2 bytes for each character. The ecx decreases by 1 until no more character is to be displayed. The ebx increases by 1 since each char occupies 1 byte in memory. the 2-byte ax holds the VGA infomation of the character to be displayed, with the high byte holding 0x0c, which means displaying char in color red, and the low byte holding the ascii code. The initial offset in edi is ((80*5+0)*2), which means that the string is to be displayed in the third line, and each line has 400 pixels in command window which exactly holds 80 characters in the width of 5 pixels each. 

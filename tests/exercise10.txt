@@ -1,0 +1,10 @@
+
+#bin、elf的一些要点：
+
+1.执行raw bin只需要将程序加载到其起始地址，即可执行; 执行elf程序则需要一个ELF Loader。uboot和Linux kernel启动时没有ELF Loader，所以烧在flash上的文件只能是raw bin，即镜像文件image。
+
+2.gcc编译出来的是elf文件，objcpy将elf文件转换为bin文件。
+
+
+reference website:
+https://blog.csdn.net/weixin_44847387/article/details/108225668

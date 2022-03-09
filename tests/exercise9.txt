@@ -1,0 +1,8 @@
+In genboot.pl it's easy to find:
+$n = sysread(SIG, $buf, 1000);
+if($n > 510){
+print STDERR "ERROR: boot block too large: $n bytes (max 510)\n";
+exit 1;
+}
+
+If the file size is larger than 510B, there will be no size for the 2-byte-long magic number since one disk section is no larger than 512 B.

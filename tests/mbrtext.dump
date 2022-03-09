@@ -1,0 +1,42 @@
+
+mbr.o：     文件格式 elf32-i386
+
+
+Disassembly of section .text:
+
+00000000 <start>:
+   0:	8c c8                	mov    %cs,%eax
+   2:	8e d8                	mov    %eax,%ds
+   4:	8e c0                	mov    %eax,%es
+   6:	8e d0                	mov    %eax,%ss
+   8:	b8 00 7d 89 c4       	mov    $0xc4897d00,%eax
+   d:	6a 0d                	push   $0xd
+   f:	68 17 00 e8 12       	push   $0x12e80017
+	...
+
+00000015 <loop>:
+  15:	eb fe                	jmp    15 <loop>
+
+00000017 <message>:
+  17:	48                   	dec    %eax
+  18:	65 6c                	gs insb (%dx),%es:(%edi)
+  1a:	6c                   	insb   (%dx),%es:(%edi)
+  1b:	6f                   	outsl  %ds:(%esi),(%dx)
+  1c:	2c 20                	sub    $0x20,%al
+  1e:	57                   	push   %edi
+  1f:	6f                   	outsl  %ds:(%esi),(%dx)
+  20:	72 6c                	jb     8e <displayStr+0x67>
+  22:	64 21 0a             	and    %ecx,%fs:(%edx)
+	...
+
+00000027 <displayStr>:
+  27:	55                   	push   %ebp
+  28:	67 8b 44 24          	mov    0x24(%si),%eax
+  2c:	04 89                	add    $0x89,%al
+  2e:	c5 67 8b             	lds    -0x75(%edi),%esp
+  31:	4c                   	dec    %esp
+  32:	24 06                	and    $0x6,%al
+  34:	b8 01 13 bb 0c       	mov    $0xcbb1301,%eax
+  39:	00 ba 00 00 cd 10    	add    %bh,0x10cd0000(%edx)
+  3f:	5d                   	pop    %ebp
+  40:	c3                   	ret    

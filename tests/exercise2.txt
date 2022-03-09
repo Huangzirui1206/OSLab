@@ -1,0 +1,17 @@
+1.When the computer is just started, the first eip is at 0xfff0, the bottom of BIOS district.
+2.At this moment, the CS register is 
+cs             0xf000
+and the IP register is 
+eip            0xfff0              
+3.The first instrction is [f000:fff0]    0xffff0:	ljmp   $0xf000,$0xe05b
+Use gdb to check this instruction, it's easy to find:
+(gdb) x/3xh 0xffff0
+0xffff0:	0x5bea	0x00e0	0x30f0
+and according to ths i386 manual, this instrction is:
+EA cd JMP ptr16:16 12+m,pm=27+m Jump intersegment, 4-byte immediate address
+The destination address is 0xf000 << 4 + 0xe05b,
+  这是运行的第一条指令，是一条跳转指令，跳转到0xfe05b地址处。至于要知道这个地址是怎么通过指令中的值计算出来的，我们需要先知道，当PC机启动时，CPU运行在实模式(real mode)下，而当进入操作系统内核后，将会运行在保护模式下(protected mode)。实模式是早期CPU，比如8088处理器的工作模式，这类处理器由于只有20根地址线，所以它们只能访问1MB的内存空间。但是CPU也在不断的发展，之后的80286/80386已经具备32位地址总线，能够访问4GB内存空间，为了能够很好的管理这么大的内存空间，保护模式被研发出来。所以现代处理器都是工作在保护模式下的。但是为了实现向后兼容性，即原来运行在8088处理器上的软件仍旧能在现代处理器上运行，所以现代的CPU都是在启动时运行于实模式，启动完成后运行于保护模式。BIOS就是PC刚启动时运行的软件，所以它必然工作在实模式。
+
+  但是由于8088CPU中寄存器都是16位，而CPU地址总线是20位的，我们怎么通过16位的寄存器去拼接20位的地址呢？
+
+　　所以我们需要采用下面的方法：把段寄存器中的值左移4位，形成20位段基址，然后和16位段内偏移相加，就得到了真实地址。比如上面的指令中段寄存器的内容为0xf000，所以真实地址为 0xf000<<4+0xe05b = 0xfe05b。

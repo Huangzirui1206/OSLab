@@ -1,0 +1,28 @@
+
+/usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu/Scrt1.o：     文件格式 elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <_start>:
+   0:	31 ed                	xor    %ebp,%ebp
+   2:	49 89 d1             	mov    %rdx,%r9
+   5:	5e                   	pop    %rsi
+   6:	48 89 e2             	mov    %rsp,%rdx
+   9:	48 83 e4 f0          	and    $0xfffffffffffffff0,%rsp
+   d:	50                   	push   %rax
+   e:	54                   	push   %rsp
+   f:	4c 8b 05 00 00 00 00 	mov    0x0(%rip),%r8        # 16 <_start+0x16>
+			12: R_X86_64_REX_GOTPCRELX	__libc_csu_fini-0x4
+  16:	48 8b 0d 00 00 00 00 	mov    0x0(%rip),%rcx        # 1d <_start+0x1d>
+			19: R_X86_64_REX_GOTPCRELX	__libc_csu_init-0x4
+  1d:	48 8b 3d 00 00 00 00 	mov    0x0(%rip),%rdi        # 24 <_start+0x24>
+			20: R_X86_64_REX_GOTPCRELX	main-0x4
+  24:	ff 15 00 00 00 00    	callq  *0x0(%rip)        # 2a <_start+0x2a>
+			26: R_X86_64_GOTPCRELX	__libc_start_main-0x4
+  2a:	f4                   	hlt   
+
+It's obvious that
+ 24:   ff 15 00 00 00 00       callq  *0x0(%rip)        # 2a <_start+0x2a>
+                        26: R_X86_64_GOTPCRELX  __libc_start_main-0x4
+is the command that call function 'main'. 

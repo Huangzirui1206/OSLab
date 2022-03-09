@@ -1,0 +1,82 @@
+The operations after several 'si' instructions:
+(gdb) si
+[f000:e05b]    0xfe05b:	cmpl   $0x0,%cs:0x70c8
+0x0000e05b in ?? ()
+(gdb) si
+[f000:e062]    0xfe062:	jne    0xfd414
+0x0000e062 in ?? ()
+(gdb) si
+[f000:e066]    0xfe066:	xor    %dx,%dx
+0x0000e066 in ?? ()
+(gdb) si
+[f000:e068]    0xfe068:	mov    %dx,%ss	#set ss register
+0x0000e068 in ?? ()
+(gdb) si
+[f000:e06a]    0xfe06a:	mov    $0x7000,%esp	#set esp register
+0x0000e06a in ?? ()
+(gdb) si
+[f000:e070]    0xfe070:	mov    $0xf2d4e,%edx
+0x0000e070 in ?? ()
+(gdb) si
+[f000:e076]    0xfe076:	jmp    0xfff00
+0x0000e076 in ?? ()
+(gdb) si
+[f000:ff00]    0xfff00:	cli    #cli block interrupt
+0x0000ff00 in ?? ()
+(gdb) si
+[f000:ff01]    0xfff01:	cld    
+	#The instructions after cld is related to in and out
+	#然后通过in，out指令和IO设备交互，进行初始化，打开A20门（暂时不用管）
+0x0000ff01 in ?? ()
+(gdb) si
+[f000:ff02]    0xfff02:	mov    %eax,%ecx
+0x0000ff02 in ?? ()
+(gdb) si
+[f000:ff05]    0xfff05:	mov    $0x8f,%eax
+0x0000ff05 in ?? ()
+(gdb) si
+[f000:ff0b]    0xfff0b:	out    %al,$0x70
+0x0000ff0b in ?? ()
+(gdb) si
+[f000:ff0d]    0xfff0d:	in     $0x71,%al
+0x0000ff0d in ?? ()
+(gdb) si
+[f000:ff0f]    0xfff0f:	in     $0x92,%al
+0x0000ff0f in ?? ()
+(gdb) si
+[f000:ff11]    0xfff11:	or     $0x2,%al
+0x0000ff11 in ?? ()
+(gdb) si
+[f000:ff13]    0xfff13:	out    %al,$0x92
+0x0000ff13 in ?? ()
+(gdb) si
+[f000:ff15]    0xfff15:	mov    %ecx,%eax
+0x0000ff15 in ?? ()
+	#然后用lidtw与lgdtw加载IDTR与GDTR（ICS学过，跟保护模式有关）
+(gdb) si
+[f000:ff18]    0xfff18:	lidtw  %cs:0x70b8
+0x0000ff18 in ?? ()
+(gdb) si
+[f000:ff1e]    0xfff1e:	lgdtw  %cs:0x7078
+0x0000ff1e in ?? ()
+(gdb) si
+[f000:ff24]    0xfff24:	mov    %cr0,%ecx
+0x0000ff24 in ?? ()
+(gdb) si
+[f000:ff27]    0xfff27:	and    $0x1fffffff,%ecx
+0x0000ff27 in ?? ()
+(gdb) si
+[f000:ff2e]    0xfff2e:	or     $0x1,%ecx
+0x0000ff2e in ?? ()
+(gdb) si
+[f000:ff32]    0xfff32:	mov    %ecx,%cr0
+0x0000ff32 in ?? ()
+	#最后开启保护模式，长跳转到BIOS的主要模块进行执行
+(gdb) si
+[f000:ff35]    0xfff35:	ljmpl  $0x8,$0xfff3d
+0x0000ff35 in ?? ()
+(gdb) si
+The target architecture is set to "i386".
+=> 0xfff3d:	mov    $0x10,%ecx
+0x000fff3d in ?? ()
+

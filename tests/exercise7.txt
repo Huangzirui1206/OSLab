@@ -1,0 +1,1 @@
+If the size of mbr.elf 300 byte, it's unable to execute qemu-system-i386 mbr.elf directly, since although the size of disk section is 512B, larger than 300B, mbr.elf doesn't have magic number 0x55 0xaa at the tail of the program.

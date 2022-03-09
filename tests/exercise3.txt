@@ -1,0 +1,27 @@
+Copy from Makefile:
+qemu-nox-gdb:
+        qemu-system-i386 -nographic -s -S os.img
+
+gdb:
+        gdb -n -x ./.gdbconf/.gdbinit
+
+linux instruction pattern :
+program <-option> files
+
+qemu-system-i386
+-s  Shorthand for -gdb tcp::1234, i.e. open a gdbserver on TCP port 1234.
+-S  Do not start CPU at startup (you must type 'c' in the monitor).
+-nographic
+           Normally, if QEMU is compiled with graphical window support, it
+           displays output such as guest graphics, guest console, and the QEMU
+           monitor in a window. With this option, you can totally disable
+           graphical output so that QEMU is a simple command line application.
+           The emulated serial port is redirected on the console and muxed with
+           the monitor (unless redirected elsewhere explicitly). Therefore, you
+           can still use QEMU to debug a Linux kernel with a serial console. Use
+           C-a h for help on switching between the console and monitor.
+
+gdb:
+-n  Do not execute commands from any .gdbinit initialization files.
+-x file
+           Execute GDB commands from file file.

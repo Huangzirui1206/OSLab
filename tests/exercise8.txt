@@ -1,0 +1,61 @@
+explain the two instructions:
+$ld -m elf_i386 -e start -Ttext 0x7c00 mbr.o -o mbr.elf
+$objcopy -S -j .text -O binary mbr.elf mbr.bin
+
+ld:
+-m emulation
+           Emulate the emulation linker.  You can list the available emulations with the --verbose
+           or -V options.
+
+           If the -m option is not used, the emulation is taken from the "LDEMULATION" environment
+           variable, if that is defined.
+
+           Otherwise, the default emulation depends upon how the linker was configured.
+
+-e entry
+       --entry=entry
+           Use entry as the explicit symbol for beginning execution of your program, rather than
+           the default entry point.  If there is no symbol named entry, the linker will try to
+           parse entry as a number, and use that as the entry address (the number will be
+           interpreted in base 10; you may use a leading 0x for base 16, or a leading 0 for base
+           8).
+
+-Ttext=org
+           Same as --section-start, with ".bss", ".data" or ".text" as the sectionname.
+
+-o output
+       --output=output
+           Use output as the name for the program produced by ld; if this option is not specified,
+           the name a.out is used by default.  The script command "OUTPUT" can also specify the
+           output file name.
+
+
+objcopy:
+-S:
+-S
+       --strip-all
+           Do not copy relocation and symbol information from the source file.
+ When generating an S-record or a raw binary file, it may be helpful to use -S to remove
+       sections containing debugging information.
+
+-j:
+-j sectionpattern
+       --only-section=sectionpattern
+           Copy only the indicated sections from the input file to the output file.  This option
+           may be given more than once.  Note that using this option inappropriately may make the
+           output file unusable.  Wildcard characters are accepted in sectionpattern.
+
+           If the first character of sectionpattern is the exclamation point (!) then matching
+           sections will not be copied, even if earlier use of --only-section on the same command
+           line would otherwise copy it.  For example:
+
+                     --only-section=.text.* --only-section=!.text.foo
+
+           will copy all sectinos maching '.text.*' but not the section '.text.foo'.
+
+-O:
+-O bfdname
+       --output-target=bfdname
+           Write the output file using the object format bfdname.
+
+

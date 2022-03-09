@@ -1,0 +1,1 @@
+The segment register is 16 bit, so it's size is 2^16 = 2^6 * 2^10 = 64 KB

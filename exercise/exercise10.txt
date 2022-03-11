@@ -5,6 +5,9 @@
 
 2.gcc编译出来的是elf文件，objcpy将elf文件转换为bin文件。
 
+用i8086反汇编.bin文件，即指令obidump -D -b binary -m i8086 OS2022/mbr.bin > mymbr/mbr.asm，可以得到正确的反汇编结果。
+	不难看出mbr.bin事实上就是mbr.elf的.text部分，但是在文件的末尾，mbr.bin增加了两字节的魔数0x55aa，并且对多余部分填充了0 。
+
 
 reference website:
 https://blog.csdn.net/weixin_44847387/article/details/108225668

@@ -1,0 +1,1 @@
+The ip register(address in segment) is 16 bit in real mode, so it's size is 2^16 = 2^6 * 2^10 = 64 KB

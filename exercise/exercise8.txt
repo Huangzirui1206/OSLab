@@ -57,5 +57,3 @@ objcopy:
 -O bfdname
        --output-target=bfdname
            Write the output file using the object format bfdname.
-
-

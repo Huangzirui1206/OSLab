@@ -10,7 +10,7 @@ reference:
 https://www.cnblogs.com/mqmelon/p/4790820.html
 
 
-EXERCISE 10:
+EXERCISE 11:
 	# 长跳转切换到保护模式
         # During the ljmp, index of cs is set to 1
         data32 ljmp $0x08, $start32	
@@ -34,4 +34,6 @@ EXERCISE 12:
 The string address is stored in ebx.
 The lenth of string is stored in ecx.
 The edi holds the offset from the base of VGA section, whose base, stored in the descriptor gs points to, is 0x8b000;
-In the loop of nextChar, edi increases by 2 every time because the VGA memory is 2 bytes for each character. The ecx decreases by 1 until no more character is to be displayed. The ebx increases by 1 since each char occupies 1 byte in memory. the 2-byte ax holds the VGA infomation of the character to be displayed, with the high byte holding 0x0c, which means displaying char in color red, and the low byte holding the ascii code. The initial offset in edi is ((80*5+0)*2), which means that the string is to be displayed in the third line, and each line has 400 pixels in command window which exactly holds 80 characters in the width of 5 pixels each. 
+In the loop of nextChar, edi increases by 2 every time because the VGA memory is 2 bytes for each character. The ecx decreases by 1 until no more character is to be displayed. The ebx increases by 1 since each char occupies 1 byte in memory. the 2-byte ax holds the VGA infomation of the character to be displayed, with the high byte holding 0x0c, which means displaying char in color red, and the low byte holding the ascii code. The initial offset in edi is ((80*5+0)*2), which means that the string is to be displayed in the sixth line, and each line has 400 pixels in command window which exactly holds 80 characters in the width of 5 pixels each. 
+
+(80*5+0)*2 80 means that there are 80 characters per line. 5 means that start displaying message from the sixth line. *2 means that each character occupies 2 bytes in memory.

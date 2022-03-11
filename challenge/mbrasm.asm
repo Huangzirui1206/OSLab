@@ -22,7 +22,7 @@ loop:
  jmp loop
 
 ;------------------------------
-;10 is '\n', and 14 is '\r'  |
+;10 is '\n', and 13 is '\r'  |
 message: db "Hello, World!",10,13
 msglen: equ $ -message
 times 510 - ($ - $$) db 0	;fill the .bin file with 0 to 510 B

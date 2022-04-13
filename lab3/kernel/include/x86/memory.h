@@ -1,6 +1,8 @@
 #ifndef __X86_MEMORY_H__
 #define __X86_MEMORY_H__
 
+//#define PAGE_ENABLED
+
 #define DPL_KERN                0
 #define DPL_USER                3
 
@@ -15,7 +17,24 @@
 #define STS_TG32    0xF         // 32-bit Trap Gate
 
 // GDT entries
-#define NR_SEGMENTS      10           // GDT size
+#ifdef PAGE_ENABLED
+	#define NR_SEGMENTS 6
+	#define KERN_CODE_SEG 1
+	#define KERN_DATA_SEG 2
+	#define USER_CODE_SEG 3
+	#define USER_DATA_SEG 4
+	#define PAGE_SIZE 0x1000
+	#define PROC_SIZE 0x100000
+	#define STACK_SIZE 0x60000
+
+	#define PAGE_DESC_P(desc,p) (desc | p)
+	#define PAGE_DESC_RW(desc,rw) (desc | (rw<<1))
+	#define PAGE_DESC_US(desc,us) (desc | (us<<2))
+	#define PAGE_DESC_BASE(desc,base) (desc | (base<<20))
+	#define PAGE_DESC_BUILD(desc, p,rw,us,base) (desc| p | (rw<<1) | (us<<2) | (base<<20))
+#else
+	#define NR_SEGMENTS      10           // GDT size
+#endif
 #define SEG_KCODE   1           // Kernel code
 #define SEG_KDATA   2           // Kernel data/stack
 #define SEG_TSS     (NR_SEGMENTS-1)
@@ -45,26 +64,59 @@ struct StackFrame {
 	uint32_t eip, cs, eflags, esp, ss;
 };
 
+
+#ifdef PAGE_ENABLED 
+#define NR_PAGES_PER_PROC 0x100
+struct PageDescriptor{
+	uint32_t p			 : 1;
+	uint32_t rw 			: 1;
+	uint32_t us			 : 1;
+	uint32_t pwt			 : 1;
+	uint32_t pcd 			: 1;
+	uint32_t access 			: 1;
+	uint32_t dirty 			: 1;
+	uint32_t zero 			: 2;
+	uint32_t avl 			: 3;
+	uint32_t base 			: 20;
+}
+#endif
+
+
 #define MAX_STACK_SIZE 2048
-#define MAX_PCB_NUM ((NR_SEGMENTS-2)/2)
+#ifndef PAGE_ENABLED
+	#define MAX_PCB_NUM ((NR_SEGMENTS-2)/2)
+#else
+	#define MAX_PCB_NUM 16
+#endif
+
 
 #define STATE_RUNNABLE 0
 #define STATE_RUNNING 1
 #define STATE_BLOCKED 2
 #define STATE_DEAD 3
+#define STATE_ZOMBIE 4 
 
 #define MAX_TIME_COUNT 16
 
 struct ProcessTable {
-	uint32_t stack[MAX_STACK_SIZE];
+	uint32_t stack[MAX_STACK_SIZE]; //kernel stack
 	struct StackFrame regs;
 	uint32_t stackTop;
-	uint32_t prevStackTop;
 	int state;
 	int timeCount;
 	int sleepTime;
 	uint32_t pid;
 	char name[32];
+
+#ifdef PAGE_ENABLED
+	PageDescriptor* pageDir;
+	PageDescriptor pageTb[NR_PAGES_PER_PROC];	
+	int busyPageFrameFirst;
+#endif
+
+	// For kernel thread 
+	//int count;
+	//int parent;
 };
 typedef struct ProcessTable ProcessTable;
 

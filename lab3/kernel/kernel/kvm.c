@@ -2,7 +2,19 @@
 #include "device.h"
 
 SegDesc gdt[NR_SEGMENTS];       // the new GDT, NR_SEGMENTS=10, defined in x86/memory.h
+// Once open macro  TABLE_ENABLE, the NR_SEGMENTS is 16
 TSS tss;
+
+#ifdef PAGE_ENABLED
+#define PAGE_START 0x100000
+#define pf_to_pa(pf) (PAGE_START+pf*PAGE_SIZE)
+	const int nr_pageFrame = MAX_PCB_NUM*(PROC_SIZE/PAGE_SIZE);
+	int pageFrameNxt[nr_pageFrame];
+	int freePageFrameFirst;
+	uint32_t freePageFrameCnt;
+	PageDescriptor userPageDir[MAX_PCB_NUM];
+	PageDescriptor kernelPageDescripto[MAX_PCB_NUM];
+#endif
 
 ProcessTable pcb[MAX_PCB_NUM];
 int runnableFirst;
@@ -12,7 +24,54 @@ int current; // current process
 int freeFirst;
 int freeNxt[MAX_PCB_NUM]; //for allocating free pcb to a new precess
 
+#ifdef PAGE_ENABLED
+	void freePageEnqueue(int pg){
+		assert(pg>=0&&pg<nr_pageFrame);
+		pageFrameNxt[pg] = freePageFrameFirst;
+		freePageFrameFirst = pg;
+	}
 
+	int freePageDequeue(){
+		int oriFirst = freePageFrameFirst;
+		if(freePageFrameFirst != -1)freePageFrameFirst = pageFrameNxt[freePageFrameFirst];
+		return oriFirst;
+	}
+
+	void busyPageEnqueue(int* busypageFrameFirst, int pg){
+		assert(pg>=0&&pg<nr_pageFrame);
+		pageFrameNxt[pg] = *busyPageFrameFirst;
+		*busyPageFrameFirst = pg;
+	}
+
+	void releaseBusyPage(int busyPageFrameFirst){
+		for(;busyPageFrameFirst!=-1;busyPageFrameFirst = pageFrameNxt[busyPageFrameFirst]){
+			freePageEnqueue(busyPageFrameFirst);
+		}
+	}
+#endif
+
+#ifdef PAGE_ENABLED
+void allocatePageFrame(uint32_t pid, uint32_t vaddr, uint32_t size){
+	int cnt = size / PAGE_SIZE;
+	if(size%PAGE_SIZE)cnt++;
+	if(freePageFrameCnt < cnt){
+		putStr("The space is not enough for allocation. Process crushed.\n");
+		assert(0);
+	}
+	int i;
+	vaddr = (vaddr&0x003ff000)>>12;
+	for(i=0;i<cnt;i++){
+		int pf = freePageDequeue();
+		busyPageEnqueue(&pcb[pid].busyPageFrameFirst,pf);
+		pcb[pid].pageTb[vaddr] = pf_to_pa(pf);
+	}
+	freePageFrameCnt -= cnt;
+}
+
+void allocateStack(pid){
+	allocatePageFrame(pid,PROC_SIZE - STACK_SIZE, STACK_SIZE);
+}
+#endif
 
 
 /*
@@ -27,8 +86,29 @@ KSEL(desc) (((desc)<<3) | DPL_KERN)
 USEL(desc) (((desc)<<3) | DPL_UERN)
 asm [volatile] (AssemblerTemplate : OutputOperands [ : InputOperands [ : Clobbers ] ])
 asm [volatile] (AssemblerTemplate : : InputOperands : Clobbers : GotoLabels)
+
+triggger PAGE_ENABLED:
+KERN_CODE_SEG  = 1
+KERN_DATA_SEG = 2
+USER_CODE_SEG = 3
+USER_DATA_SEG = 4
+NR_SEGMENTS = 6
+PAGE_SIZE = 0x1000
 */
+#ifdef PAGE_ENABLED
+void initPage(){//set up page frames
+	int i;
+	for(i=0;i<nr_pageFrame;i++){
+		pageFrameNxt[i] = i+1;
+	}
+	pageFrameNxt[nr_pageFrame-1] = -1;
+	freePageFrameFirst = 0;
+	freePageFrameCnt = nr_pageFrame;
+}
+#endif
+
 void initSeg() { // setup kernel segements
+#ifndef PAGE_ENABLED
 	int i;
 	//gdt[1] and gdt[2]
 	gdt[SEG_KCODE] = SEG(STA_X | STA_R, 0,       0xffffffff, DPL_KERN);
@@ -45,6 +125,15 @@ void initSeg() { // setup kernel segements
 
 	setGdt(gdt, sizeof(gdt)); // gdt is set in bootloader, here reset gdt in kernel
 
+#else
+	gdt[KERN_CODE_SEG] =  SEG(STA_X | STA_R, 0,       0xffffffff, DPL_KERN);
+	gdt[KERN_DATA_SEG] = SEG(STA_W,         0,       0xffffffff, DPL_KERN);
+	gdt[USER_CODE_SEG] = SEG(STA_X | STA_R, 0,       0xffffffff, DPL_USER);
+	gdt[USER_DATA_SEG] = SEG(STA_W,         0,       0xffffffff, DPL_USER);
+	gdt[SEG_TSS] = SEG16(STS_T32A,      &tss, sizeof(TSS)-1, DPL_KERN);
+	gdt[SEG_TSS].s = 0;//system
+#endif
+
 	/* initialize TSS */
 	tss.ss0 = KSEL(SEG_KDATA);
 	asm volatile("ltr %%ax":: "a" (KSEL(SEG_TSS)));
@@ -54,7 +143,6 @@ void initSeg() { // setup kernel segements
 	asm volatile("movw %%ax,%%ss":: "a" (KSEL(SEG_KDATA)));
 
 	lLdt(0);
-	
 }
 
 uint32_t loadUMain();
@@ -63,6 +151,12 @@ void initProc() {
 	int i = 0;
 	for (i = 0; i < MAX_PCB_NUM; i++) {
 		pcb[i].state = STATE_DEAD;
+#ifdef PAGE_ENABLED
+		if(i) pcb[i].pageDir = userPageDir[i];
+		else pcb[0].pageDir = kernelPageDir; //kernel
+		*pcb[i].pageDir =PAGE_DESC_BUILD(0,0,0,0,(unsigned int)&pcb[i].pageTb);
+		kernelPageDir[i] = *pcb[i].pageDir;//kernel keeps all page tables;
+#endif
 	}
 	for(i = 0;i < MAX_PCB_NUM; i++){
 			runnableNxt[i] = -1;
@@ -78,23 +172,40 @@ void initProc() {
 	pcb[0].timeCount = MAX_TIME_COUNT;
 	pcb[0].sleepTime = 0;
 	pcb[0].pid = 0;
+#ifdef PAGE_ENABLED
+	for(i=0;i<NR_PAGES_PER_PROC;i++){
+		pcb[0].pageTb[i] = PAGE_DESC_BUILD(0,1,0,0,pf_to_pa(i));
+	}
+	freePageFrameFirst = NR_PAGES_PER_PROC;
+	freePageFrameCnt -= NR_PAGES_PER_PROC;
+#endif
 	// user process
 	pcb[1].stackTop = (uint32_t)&(pcb[1].regs);
 	pcb[1].state = STATE_RUNNABLE;
 	pcb[1].timeCount = 0;
 	pcb[1].sleepTime = 0;
 	pcb[1].pid = 1;
+#ifndef PAGE_ENABLED
 	pcb[1].regs.ss = USEL(4);
-	pcb[1].regs.esp = 0x100000;
-	asm volatile("pushfl");
-	asm volatile("popl %0":"=r"(pcb[1].regs.eflags));
-	pcb[1].regs.eflags = pcb[1].regs.eflags | 0x200;
 	pcb[1].regs.cs = USEL(3);
-	pcb[1].regs.eip = loadUMain();
 	pcb[1].regs.ds = USEL(4);
 	pcb[1].regs.es = USEL(4);
 	pcb[1].regs.fs = USEL(4);
 	pcb[1].regs.gs = USEL(4);
+#else
+	allocateStack(pid)
+	pcb[1].regs.ss = USER_DATA_SEG;
+	pcb[1].regs.cs = USER_CODE_SEG;
+	pcb[1].regs.ds = USER_DATA_SEG;
+	pcb[1].regs.es = USER_DATA_SEG;
+	pcb[1].regs.fs = USER_DATA_SEG;
+	pcb[1].regs.gs = USER_DATA_SEG;
+#endif
+	pcb[1].regs.esp = 0x100000;
+	pcb[1].regs.eip = loadUMain();
+	asm volatile("pushfl");
+	asm volatile("popl %0":"=r"(pcb[1].regs.eflags));
+	pcb[1].regs.eflags = pcb[1].regs.eflags | 0x200;
 
 	current = 0; // kernel idle process
 	runnableFirst = runnableTail = 1; //user process is waiting in queue
@@ -131,13 +242,14 @@ void *loadmemset(void *dst,unsigned char ch,unsigned len){
 	return dst;
 }
 
+
 //把elf文件加载到Pysaddr开始的地址，即将加载的程序以编号为Secstart的扇区开始，占据Secnum个扇区（LBA），传入的entry是个指针
 int loadelf(uint32_t Secstart, uint32_t Secnum,uint32_t Pysaddr,uint32_t *entry){
 	int i = 0;
 	int phoff = 0x34;
 	int phnum = 0;
-	//char buf[Secnum*512];
-	unsigned int elf = Pysaddr + 0x80000;
+	char buf[Secnum*512];
+	unsigned int elf = (unsigned int)buf;
 	struct ProgramHeader *thisph = 0x0;
 
 	for (i = 0; i < Secnum; i++) {
@@ -150,12 +262,21 @@ int loadelf(uint32_t Secstart, uint32_t Secnum,uint32_t Pysaddr,uint32_t *entry)
 	for(i = 0; i < phnum; i++){
 		thisph = ((struct ProgramHeader *)(elf + phoff) + i);
 		if(thisph->type == PT_LOAD){
+#ifndef PAGE_ENABLED
 			loadmemcpy((void *)Pysaddr + thisph->vaddr, ((void *)elf+thisph->off), thisph->filesz);
 			loadmemset((void *)Pysaddr + thisph->vaddr+thisph->filesz, 0, thisph->memsz-thisph->filesz);
+#else
+			allcatePageFrame(pid,thisph->vaddr,thisph->memsz); // allocate space for the PT_LOAD contents first
+			//Inside kernel, all page tables are reachable.
+			kernelVaddr = (pid << 22) | thisph->vaddr;
+			loadmemcpy((void *)kernelVaddr, ((void *)elf+thisph->off), thisph->filesz);
+			loadmemset((void *)kernelVaddr+thisph->filesz, 0, thisph->memsz-thisph->filesz);
+#endif
 		}
 	}
 	return 0;
 }
+
 
 uint32_t loadUMain(){
 	uint32_t entry = 0;

@@ -1,6 +1,7 @@
 #include "common.h"
 #include "x86.h"
 #include "device.h"
+//TODO:Finish kernel thread technology
 
 #define va_to_pa(va) (va + (current + 1) * 0x100000)
 #define pa_to_va(pa) (pa - (current + 1) * 0x100000)
@@ -221,17 +222,31 @@ void syscallFork(struct StackFrame *sf){
 	sf->eax = i;
 	if(i==-1)return;
 	//copy segment address space
+#ifndef PAGE_ENABLED
 	memcpy((void*)desc_to_pbase(i),(void*)va_to_pa(0),SEG_SIZE*2);
-	// 拷贝pcb，这部分代码给出了，请注意理解
 	memcpy(&pcb[i],&pcb[current],sizeof(ProcessTable));
-	
+#else
+	//TODO: Finish fork under page system
+	//TODO: Finish write_on_copy strategy.
+#endif	
+
+
 	pcb[i].regs.eax = 0;
+#ifndef PAGE_ENABLED
 	pcb[i].regs.cs = USEL(1 + i * 2);
 	pcb[i].regs.ds = USEL(2 + i * 2);
 	pcb[i].regs.es = USEL(2 + i * 2);
 	pcb[i].regs.fs = USEL(2 + i * 2);
 	pcb[i].regs.gs = USEL(2 + i * 2);
 	pcb[i].regs.ss = USEL(2 + i * 2);
+#else
+	pcb[i].regs.cs = USER_CODE_SEG;
+	pcb[i].regs.ds = USER_DATA_SEG;
+	pcb[i].regs.es = USER_DATA_SEG;
+	pcb[i].regs.fs = USER_DATA_SEG;
+	pcb[i].regs.gs = USER_DATA_SEG;
+	pcb[i].regs.ss = USER_DATA_SEG;
+#endif
 	pcb[i].stackTop = (uint32_t)&(pcb[i].regs);
 	pcb[i].state = STATE_RUNNABLE;
 	runnableEnqueue(i);
@@ -245,7 +260,13 @@ void syscallExec(struct StackFrame *sf) {
 	uint32_t entry = 0;
 	uint32_t secstart = sf->ecx;
 	uint32_t secnum =  sf->edx;
+#ifndef PAGE_ENABLED
 	loadelf(secstart,secnum,va_to_pa(0),&entry);
+#else
+	releaseBusyPage(pcb[current].busyPageFrameFirst);
+	loadelf(secstart,secnum,va_to_pa(0),&entry,current);
+	allocateStack(pid)
+#endif
 	sf->esp = SEG_SIZE;
 	sf->eflags = sf->eflags | 0x200;
 	sf->eip = entry;
@@ -273,6 +294,9 @@ void syscallSleep(struct StackFrame *sf){
 void syscallExit(struct StackFrame *sf){
 	int error = sf->ecx;
 	if(error)assert(error!=0);
+#ifdef PAGE_ENABLED
+	releaseBusyPage(pcb[current].busyPageFrameFirst); //Release the process space.
+#endif
 	pcb[current].state = STATE_DEAD;
 	freeEnqueue(current);
 	int nxtProc = runnableDequeue();

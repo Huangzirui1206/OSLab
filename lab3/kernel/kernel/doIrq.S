@@ -47,7 +47,7 @@ irqGProtectFault:
 
 .global irqPageFault
 irqPageFault:
-	pushl $-1
+	pushl $0xe
 	jmp asmDoIrq
 
 .global irqAlignCheck

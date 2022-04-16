@@ -24,13 +24,10 @@
 	#define USER_CODE_SEG 3
 	#define USER_DATA_SEG 4
 	#define PAGE_SIZE 0x1000
-	#define PROC_SIZE 0x100000
+	#define MAX_PROC_SIZE 0x100000
 	#define STACK_SIZE 0x60000
+	#define NR_PAGES_PER_PROC 0x100
 
-	#define PAGE_DESC_P(desc,p) (desc | p)
-	#define PAGE_DESC_RW(desc,rw) (desc | (rw<<1))
-	#define PAGE_DESC_US(desc,us) (desc | (us<<2))
-	#define PAGE_DESC_BASE(desc,base) (desc | (base<<20))
 	#define PAGE_DESC_BUILD(desc, p,rw,us,base) (desc| p | (rw<<1) | (us<<2) | (base<<20))
 #else
 	#define NR_SEGMENTS      10           // GDT size
@@ -66,7 +63,6 @@ struct StackFrame {
 
 
 #ifdef PAGE_ENABLED 
-#define NR_PAGES_PER_PROC 0x100
 struct PageDescriptor{
 	uint32_t p			 : 1;
 	uint32_t rw 			: 1;
@@ -75,7 +71,13 @@ struct PageDescriptor{
 	uint32_t pcd 			: 1;
 	uint32_t access 			: 1;
 	uint32_t dirty 			: 1;
-	uint32_t zero 			: 2;
+	union{
+		uint32_t zero 			: 2;
+		struct{
+			uint32_t real_rw		:1;
+			uint32_t dontcare		:1;
+		};
+	}
 	uint32_t avl 			: 3;
 	uint32_t base 			: 20;
 }
@@ -110,8 +112,11 @@ struct ProcessTable {
 
 #ifdef PAGE_ENABLED
 	PageDescriptor* pageDir;
-	PageDescriptor pageTb[NR_PAGES_PER_PROC];	
+	PageDescriptor pageTb[NR_PAGES_PER_PROC];
+	uint32_t procSize;
 	int busyPageFrameFirst;
+	uint32_t active_mm;//other:copy_on_write; pid:reserve own memory
+	uint32_t copyNum;
 #endif
 
 	// For kernel thread 
@@ -167,7 +172,7 @@ struct TSS {
 			uint32_t cr3, eip, eflags, eax, ecx, edx, ebx, esp, ebp, esi, edi;
 			uint32_t es, cs, ss, ds, fs, gs, ldt;
 		};
-        };
+    };
 };
 typedef struct TSS TSS;
 

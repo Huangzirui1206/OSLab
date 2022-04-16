@@ -4,16 +4,18 @@
 SegDesc gdt[NR_SEGMENTS];       // the new GDT, NR_SEGMENTS=10, defined in x86/memory.h
 // Once open macro  TABLE_ENABLE, the NR_SEGMENTS is 16
 TSS tss;
-
 #ifdef PAGE_ENABLED
 #define PAGE_START 0x100000
 #define pf_to_pa(pf) (PAGE_START+pf*PAGE_SIZE)
 	const int nr_pageFrame = MAX_PCB_NUM*(PROC_SIZE/PAGE_SIZE);
+
 	int pageFrameNxt[nr_pageFrame];
 	int freePageFrameFirst;
 	uint32_t freePageFrameCnt;
-	PageDescriptor userPageDir[MAX_PCB_NUM];
-	PageDescriptor kernelPageDescripto[MAX_PCB_NUM];
+
+	PageDescriptor kernelPageDir[MAX_PCB_NUM];
+
+#define ph_w(flag) ((flag&2)>>1)
 #endif
 
 ProcessTable pcb[MAX_PCB_NUM];
@@ -25,25 +27,25 @@ int freeFirst;
 int freeNxt[MAX_PCB_NUM]; //for allocating free pcb to a new precess
 
 #ifdef PAGE_ENABLED
-	void freePageEnqueue(int pg){
+	static void freePageEnqueue(int pg){
 		assert(pg>=0&&pg<nr_pageFrame);
 		pageFrameNxt[pg] = freePageFrameFirst;
 		freePageFrameFirst = pg;
 	}
 
-	int freePageDequeue(){
+	static int freePageDequeue(){
 		int oriFirst = freePageFrameFirst;
 		if(freePageFrameFirst != -1)freePageFrameFirst = pageFrameNxt[freePageFrameFirst];
 		return oriFirst;
 	}
 
-	void busyPageEnqueue(int* busypageFrameFirst, int pg){
+	static void busyPageEnqueue(int* busypageFrameFirst, int pg){
 		assert(pg>=0&&pg<nr_pageFrame);
 		pageFrameNxt[pg] = *busyPageFrameFirst;
 		*busyPageFrameFirst = pg;
 	}
 
-	void releaseBusyPage(int busyPageFrameFirst){
+	static void releaseBusyPage(int busyPageFrameFirst){
 		for(;busyPageFrameFirst!=-1;busyPageFrameFirst = pageFrameNxt[busyPageFrameFirst]){
 			freePageEnqueue(busyPageFrameFirst);
 		}
@@ -51,7 +53,7 @@ int freeNxt[MAX_PCB_NUM]; //for allocating free pcb to a new precess
 #endif
 
 #ifdef PAGE_ENABLED
-void allocatePageFrame(uint32_t pid, uint32_t vaddr, uint32_t size){
+void allocatePageFrame(uint32_t pid, uint32_t vaddr, uint32_t size, uint32_t rw){
 	int cnt = size / PAGE_SIZE;
 	if(size%PAGE_SIZE)cnt++;
 	if(freePageFrameCnt < cnt){
@@ -63,13 +65,22 @@ void allocatePageFrame(uint32_t pid, uint32_t vaddr, uint32_t size){
 	for(i=0;i<cnt;i++){
 		int pf = freePageDequeue();
 		busyPageEnqueue(&pcb[pid].busyPageFrameFirst,pf);
-		pcb[pid].pageTb[vaddr] = pf_to_pa(pf);
+		pcb[pid].pageTb[vaddr] = PAGE_DESC_BUILD(0,1,rw,1,pf_to_pa(pf));
+		pcb[pid] += PAGE_SIZE;
+
 	}
 	freePageFrameCnt -= cnt;
 }
 
-void allocateStack(pid){
-	allocatePageFrame(pid,PROC_SIZE - STACK_SIZE, STACK_SIZE);
+void allocateStack(uint32_t pid){
+	allocatePageFrame(pid,MAX_PROC_SIZE - STACK_SIZE, STACK_SIZE, 1);
+}
+
+void clearPageTable(uint32_t pid){
+	for(int i = 0;i<NR_PAGES_PER_PROC;i++){
+		(uint32_t)pcb[pid].pageTb[i] = 0;
+	}
+	pcb[i].procSize = 0;
 }
 #endif
 
@@ -104,6 +115,28 @@ void initPage(){//set up page frames
 	pageFrameNxt[nr_pageFrame-1] = -1;
 	freePageFrameFirst = 0;
 	freePageFrameCnt = nr_pageFrame;
+	for(i=0;i<MAX_PCB_NUM;i++){
+		clearPageTable(i);
+		pcb[i].procSize = 0;
+		pcb[i].active_mm = i;
+		pcb[i].copyNum = 0;
+	}
+	//init kernel proc table
+	pcb[0].pageDir = kernelPageDir; //kernel
+	*pcb[0].pageDir =PAGE_DESC_BUILD(0,1,0,0,(unsigned int)&pcb[0].pageTb);
+	pcb[0].procSize = MAX_PROC_SIZE ;
+	for(i=0;i<NR_PAGES_PER_PROC;i++){
+		pcb[0].pageTb[i] = PAGE_DESC_BUILD(0,1,1,0,pf_to_pa(i));
+	}
+	freePageFrameFirst = NR_PAGES_PER_PROC;
+	freePageFrameCnt -= NR_PAGES_PER_PROC;
+	// enable page 
+	uint32_t pg_enable = 0x80000000;
+	uint32_t kern_cr3 = pcb[0].pageDir;
+	asm volatile("movl %0,%%cr3":"=m"(kern_cr3)); 
+	asm volatile("movl %%cr0,%%eax");
+	asm volatile("or1 %0, %%eax":"=m"(pg_enable));
+	asm volatile("movl %%eax, %%cr0");
 }
 #endif
 
@@ -136,6 +169,9 @@ void initSeg() { // setup kernel segements
 
 	/* initialize TSS */
 	tss.ss0 = KSEL(SEG_KDATA);
+#ifdef PAGE_ENABLED
+	tss.cr3 = pcb[0].pageDir;
+#endif
 	asm volatile("ltr %%ax":: "a" (KSEL(SEG_TSS)));
 
 	/* reassign segment register */
@@ -152,10 +188,10 @@ void initProc() {
 	for (i = 0; i < MAX_PCB_NUM; i++) {
 		pcb[i].state = STATE_DEAD;
 #ifdef PAGE_ENABLED
-		if(i) pcb[i].pageDir = userPageDir[i];
-		else pcb[0].pageDir = kernelPageDir; //kernel
-		*pcb[i].pageDir =PAGE_DESC_BUILD(0,0,0,0,(unsigned int)&pcb[i].pageTb);
-		kernelPageDir[i] = *pcb[i].pageDir;//kernel keeps all page tables;
+		if(i) { //pcb[0] has been initialized above in initPage().
+			pcb[i].pageDir = kernelPageDir + i;
+			*pcb[i].pageDir =PAGE_DESC_BUILD(0,1,0,1,(unsigned int)&pcb[i].pageTb);
+		}
 #endif
 	}
 	for(i = 0;i < MAX_PCB_NUM; i++){
@@ -167,18 +203,12 @@ void initProc() {
 	freeFirst = 0;
 	freeNxt[MAX_PCB_NUM - 1] = -1;
 	// kernel process
-	pcb[0].stackTop = (uint32_t)&(pcb[0].stackTop)-8;//这里最好像这样减8对齐，虽然影响不大...
+	pcb[0].stackTop = (uint32_t)&(pcb[0].stackTop);//这里最好像这样减8对齐，虽然影响不大...
 	pcb[0].state = STATE_RUNNING;
 	pcb[0].timeCount = MAX_TIME_COUNT;
 	pcb[0].sleepTime = 0;
 	pcb[0].pid = 0;
-#ifdef PAGE_ENABLED
-	for(i=0;i<NR_PAGES_PER_PROC;i++){
-		pcb[0].pageTb[i] = PAGE_DESC_BUILD(0,1,0,0,pf_to_pa(i));
-	}
-	freePageFrameFirst = NR_PAGES_PER_PROC;
-	freePageFrameCnt -= NR_PAGES_PER_PROC;
-#endif
+
 	// user process
 	pcb[1].stackTop = (uint32_t)&(pcb[1].regs);
 	pcb[1].state = STATE_RUNNABLE;
@@ -266,9 +296,9 @@ int loadelf(uint32_t Secstart, uint32_t Secnum,uint32_t Pysaddr,uint32_t *entry)
 			loadmemcpy((void *)Pysaddr + thisph->vaddr, ((void *)elf+thisph->off), thisph->filesz);
 			loadmemset((void *)Pysaddr + thisph->vaddr+thisph->filesz, 0, thisph->memsz-thisph->filesz);
 #else
-			allcatePageFrame(pid,thisph->vaddr,thisph->memsz); // allocate space for the PT_LOAD contents first
+			allcatePageFrame(pid,thisph->vaddr,thisph->memsz,ph_w(thisph->flags)); // allocate space for the PT_LOAD contents first, macro ph_w judge whether writable or not
 			//Inside kernel, all page tables are reachable.
-			kernelVaddr = (pid << 22) | thisph->vaddr;
+			uint32_t kernelVaddr = (pid << 22) | thisph->vaddr;
 			loadmemcpy((void *)kernelVaddr, ((void *)elf+thisph->off), thisph->filesz);
 			loadmemset((void *)kernelVaddr+thisph->filesz, 0, thisph->memsz-thisph->filesz);
 #endif

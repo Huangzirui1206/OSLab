@@ -20,6 +20,10 @@ extern int current; // current process
 extern int freeFirst;
 extern int freeNxt[MAX_PCB_NUM]; //for allocating free pcb to a new precess
 
+#ifdef
+extern	PageDescriptor kernelPageDir[MAX_PCB_NUM];
+#endif
+
 static void runnableEnqueue(uint32_t num){
 	assert(num<MAX_PCB_NUM);
 	pcb[num].state = STATE_RUNNABLE;
@@ -54,6 +58,7 @@ static int freeDequeue(){
 }
 
 void GProtectFaultHandle(struct StackFrame *sf);
+void PageFaultHandle(struct StackFrame *sf);
 
 void timerHandle(struct StackFrame *sf);
 
@@ -69,6 +74,9 @@ void syscallExit(struct StackFrame *sf);
 static void switchProc(uint32_t num){
 	current = num;
 	pcb[current].state = STATE_RUNNING;
+#ifdef PAGE_ENABLED
+	tss.cr3 = pcb[num].pageDir;
+#endif
 	int tmpStackTop=pcb[num].stackTop;
     tss.esp0=(uint32_t)&(pcb[num].stackTop); //use as kernel stack
     asm volatile("movl %0,%%esp"::"m"(tmpStackTop));
@@ -80,6 +88,18 @@ static void switchProc(uint32_t num){
     asm volatile("addl $8,%esp");
     asm volatile("iret");
 }
+
+#ifdef PAGE_ENABLED
+static void pageTableRecover(uint32_t pid){
+	for(int i=0;i<NR_PAGES_PER_PROC;i++){
+		pcb[pid].pageTb[i].rw = pcb[pid].pageTb[i].real_rw
+	}
+} 
+
+static void procCopy(uint32_t dst, uint32_t src){
+	//TODO: allocate memory and copy page content
+}
+#endif
 
 void irqHandle(struct StackFrame *sf) { // pointer sf = esp
 	/* Reassign segment register */
@@ -101,11 +121,40 @@ void irqHandle(struct StackFrame *sf) { // pointer sf = esp
 		case 0x80:
 			syscallHandle(sf);
 			break;
+		case 0xe:
+			PageFaultHandle(sf);
+			break;
 		default:assert(0);
 	}
 }
 
 void GProtectFaultHandle(struct StackFrame *sf) {
+	assert(0);
+	return;
+}
+
+void PageFaultHandle(struct StackFrame *sf){
+#ifdef PAGE_ENABLED
+	if(pcb[current].active_mm != pcb[current].pid){
+		active_pcb =  pcb[current].active_mm;
+		pcb[active_pcb].copyNum -= 1;
+		pcb[current].active_mm = pcb[current].pid;
+		pcb[current].pageDir =  kernelPageDir + current;
+		tss.cr3 = pcb[num].pageDir;
+		procCopy(active_pcb, current);
+		if(pcb[active_pcb].copyNum == 0){
+			pageTableRecover(active_job);
+		}
+		return;
+	}
+	else if(pcb[current].copyNum != 0){
+		//TODO: parent process copy-on-write
+	}
+	else{
+		putStr("Page Fault: try to write on read-only page\n");
+	}
+#endif
+	putStr("Page Fault! Programme exits with code -1.\n");
 	assert(0);
 	return;
 }
@@ -226,11 +275,19 @@ void syscallFork(struct StackFrame *sf){
 	memcpy((void*)desc_to_pbase(i),(void*)va_to_pa(0),SEG_SIZE*2);
 	memcpy(&pcb[i],&pcb[current],sizeof(ProcessTable));
 #else
-	//TODO: Finish fork under page system
-	//TODO: Finish write_on_copy strategy.
+	// copy_on_write
+	if(pcb[current].copyNum == 0){
+		for(int j = 0;j<NR_PAGES_PER_PROC;j++){
+			pcb[current].pageTb[j].real_rw = pcb[j].pageTb[j].rw;
+			pcb[current].pageTb[j].rw = 0;
+		}
+	}
+	}
+	pcb[i].active_mm = current;
+	pcb[current].copyNum +=1; 
+	pcb[i].pageDir = pcb[current].pageDir;
 #endif	
-
-
+	// return 0 to child process
 	pcb[i].regs.eax = 0;
 #ifndef PAGE_ENABLED
 	pcb[i].regs.cs = USEL(1 + i * 2);
@@ -263,7 +320,9 @@ void syscallExec(struct StackFrame *sf) {
 #ifndef PAGE_ENABLED
 	loadelf(secstart,secnum,va_to_pa(0),&entry);
 #else
+	//TODO: need handle copy-on-write
 	releaseBusyPage(pcb[current].busyPageFrameFirst);
+	clearPageTable(current);
 	loadelf(secstart,secnum,va_to_pa(0),&entry,current);
 	allocateStack(pid)
 #endif
@@ -295,6 +354,7 @@ void syscallExit(struct StackFrame *sf){
 	int error = sf->ecx;
 	if(error)assert(error!=0);
 #ifdef PAGE_ENABLED
+	clearPageTable(current);
 	releaseBusyPage(pcb[current].busyPageFrameFirst); //Release the process space.
 #endif
 	pcb[current].state = STATE_DEAD;

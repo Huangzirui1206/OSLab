@@ -12,5 +12,8 @@ void kEntry(void) {
 	initSeg(); // initialize gdt, tss
 	initVga(); // initialize vga device
 	initTimer(); // initialize timer device
+#ifdef PAGE_ENABLED
+	initPage();
+#endif
 	initProc();
 }

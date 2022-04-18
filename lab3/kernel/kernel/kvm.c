@@ -2,20 +2,35 @@
 #include "device.h"
 
 SegDesc gdt[NR_SEGMENTS];       // the new GDT, NR_SEGMENTS=10, defined in x86/memory.h
-// Once open macro  TABLE_ENABLE, the NR_SEGMENTS is 16
+// Once open macro  TABLE_ENABLE, the NR_SEGMENTS is 6
 TSS tss;
 #ifdef PAGE_ENABLED
 #define PAGE_START 0x100000
 #define pf_to_pa(pf) (PAGE_START+pf*PAGE_SIZE)
-	const int nr_pageFrame = MAX_PCB_NUM*(PROC_SIZE/PAGE_SIZE);
+#define nr_pageFrame  (MAX_PCB_NUM*(MAX_PROC_SIZE/PAGE_SIZE))
 
 	int pageFrameNxt[nr_pageFrame];
 	int freePageFrameFirst;
 	uint32_t freePageFrameCnt;
 
-	PageDescriptor kernelPageDir[MAX_PCB_NUM];
+	PageFrame kernelPageDir; // only page[0],page[1],page[2] is used
+	PageFrame pageFrame[3];
+	PageFrame userPageDir;
 
 #define ph_w(flag) ((flag&2)>>1)
+#endif
+
+#ifdef DEBUG
+void eax_get_eip(){
+	putStr("The eip for break should be ");
+	asm volatile("movl %ebp,%ebx");
+	asm volatile("addl $4,%ebx");
+	asm volatile("movl (%ebx),%eax");
+	uint32_t eip;
+	asm volatile("movl %%eax,%0":"=m"(eip));
+	putNumX(eip);
+	putChar('\n');
+}
 #endif
 
 ProcessTable pcb[MAX_PCB_NUM];
@@ -39,13 +54,13 @@ int freeNxt[MAX_PCB_NUM]; //for allocating free pcb to a new precess
 		return oriFirst;
 	}
 
-	static void busyPageEnqueue(int* busypageFrameFirst, int pg){
+	void busyPageEnqueue(int* busyPageFrameFirst, int pg){
 		assert(pg>=0&&pg<nr_pageFrame);
 		pageFrameNxt[pg] = *busyPageFrameFirst;
 		*busyPageFrameFirst = pg;
 	}
 
-	static void releaseBusyPage(int busyPageFrameFirst){
+	void releaseBusyPage(int busyPageFrameFirst){
 		for(;busyPageFrameFirst!=-1;busyPageFrameFirst = pageFrameNxt[busyPageFrameFirst]){
 			freePageEnqueue(busyPageFrameFirst);
 		}
@@ -65,8 +80,8 @@ void allocatePageFrame(uint32_t pid, uint32_t vaddr, uint32_t size, uint32_t rw)
 	for(i=0;i<cnt;i++){
 		int pf = freePageDequeue();
 		busyPageEnqueue(&pcb[pid].busyPageFrameFirst,pf);
-		pcb[pid].pageTb[vaddr] = PAGE_DESC_BUILD(0,1,rw,1,pf_to_pa(pf));
-		pcb[pid] += PAGE_SIZE;
+		pcb[pid].pageTb[vaddr].val = PAGE_DESC_BUILD(0,1,rw,1,pf_to_pa(pf));
+		pcb[pid].procSize += PAGE_SIZE;
 
 	}
 	freePageFrameCnt -= cnt;
@@ -78,9 +93,15 @@ void allocateStack(uint32_t pid){
 
 void clearPageTable(uint32_t pid){
 	for(int i = 0;i<NR_PAGES_PER_PROC;i++){
-		(uint32_t)pcb[pid].pageTb[i] = 0;
+		pcb[pid].pageTb[i].val = 0;
 	}
-	pcb[i].procSize = 0;
+	pcb[pid].procSize = 0;
+}
+
+inline void freshPageFrame(int num, int pf){
+	for(int i = 0; i<NR_PAGES_PER_PROC; i++){
+		pageFrame[pf].content[i] = pcb[num].pageTb[i];
+	}
 }
 #endif
 
@@ -108,6 +129,7 @@ PAGE_SIZE = 0x1000
 */
 #ifdef PAGE_ENABLED
 void initPage(){//set up page frames
+	putStr("enter initPage()\n");
 	int i;
 	for(i=0;i<nr_pageFrame;i++){
 		pageFrameNxt[i] = i+1;
@@ -122,25 +144,38 @@ void initPage(){//set up page frames
 		pcb[i].copyNum = 0;
 	}
 	//init kernel proc table
-	pcb[0].pageDir = kernelPageDir; //kernel
-	*pcb[0].pageDir =PAGE_DESC_BUILD(0,1,0,0,(unsigned int)&pcb[0].pageTb);
+	kernelPageDir.content[0].val =PAGE_DESC_BUILD(0,1,0,0,(unsigned int)pageFrame[1].content); //kernel pageFrame
+	kernelPageDir.content[1].val =PAGE_DESC_BUILD(0,1,0,1,(unsigned int)pageFrame[0].content); //src user pageFrame
+	kernelPageDir.content[2].val =PAGE_DESC_BUILD(0,1,0,1,(unsigned int)pageFrame[2].content); //dst user pageFrame
+	userPageDir.content[0].val = PAGE_DESC_BUILD(0,1,0,1,(unsigned int)pageFrame[0].content); // user pageDir --> user pageFrame
 	pcb[0].procSize = MAX_PROC_SIZE ;
 	for(i=0;i<NR_PAGES_PER_PROC;i++){
-		pcb[0].pageTb[i] = PAGE_DESC_BUILD(0,1,1,0,pf_to_pa(i));
-	}
+		pcb[0].pageTb[i].val = PAGE_DESC_BUILD(0,1,1,0,pf_to_pa(i));
+		pageFrame[1].content[i].val = PAGE_DESC_BUILD(0,1,1,0,pf_to_pa(i));
+ 	}
+	pcb[0].procSize += MAX_PROC_SIZE;
 	freePageFrameFirst = NR_PAGES_PER_PROC;
 	freePageFrameCnt -= NR_PAGES_PER_PROC;
-	// enable page 
-	uint32_t pg_enable = 0x80000000;
-	uint32_t kern_cr3 = pcb[0].pageDir;
-	asm volatile("movl %0,%%cr3":"=m"(kern_cr3)); 
-	asm volatile("movl %%cr0,%%eax");
-	asm volatile("or1 %0, %%eax":"=m"(pg_enable));
-	asm volatile("movl %%eax, %%cr0");
+	// enable page
+	uint32_t kern_cr3 = (uint32_t)kernelPageDir.content;
+	putStr("kernelPageDir addr: ");
+	putNumX((uint32_t)kernelPageDir.content);
+	putStr("   pageFrame[1]: ");
+	putNumX(pageFrame[1].content);
+	putChar('\n');
+	eax_get_eip();
+	asm volatile("movl %0,%%eax":"=m"(kern_cr3));
+	asm volatile("movl %eax, %cr3");
+	asm volatile("movl %cr0,%eax");
+	asm volatile("orl $0x80000000, %eax");
+	asm volatile("movl %eax, %cr0");
+	putStr("Arrive here in  initPage(), assert(0) for debug.\n");
+	assert(0);
 }
 #endif
 
 void initSeg() { // setup kernel segements
+	putStr("enter initSeg()\n");
 #ifndef PAGE_ENABLED
 	int i;
 	//gdt[1] and gdt[2]
@@ -156,29 +191,29 @@ void initSeg() { // setup kernel segements
 	gdt[SEG_TSS] = SEG16(STS_T32A,      &tss, sizeof(TSS)-1, DPL_KERN);
 	gdt[SEG_TSS].s = 0;//system
 
-	setGdt(gdt, sizeof(gdt)); // gdt is set in bootloader, here reset gdt in kernel
-
 #else
-	gdt[KERN_CODE_SEG] =  SEG(STA_X | STA_R, 0,       0xffffffff, DPL_KERN);
-	gdt[KERN_DATA_SEG] = SEG(STA_W,         0,       0xffffffff, DPL_KERN);
-	gdt[USER_CODE_SEG] = SEG(STA_X | STA_R, 0,       0xffffffff, DPL_USER);
-	gdt[USER_DATA_SEG] = SEG(STA_W,         0,       0xffffffff, DPL_USER);
+	gdt[SEG_KCODE] =  SEG(STA_X | STA_R, 0,       0xffffffff, DPL_KERN);
+	gdt[SEG_KDATA] = SEG(STA_W,         0,       0xffffffff, DPL_KERN);
+	gdt[SEG_UCODE] = SEG(STA_X | STA_R, 0,       0xffffffff, DPL_USER);
+	gdt[SEG_UDATA] = SEG(STA_W,         0,       0xffffffff, DPL_USER);
 	gdt[SEG_TSS] = SEG16(STS_T32A,      &tss, sizeof(TSS)-1, DPL_KERN);
 	gdt[SEG_TSS].s = 0;//system
 #endif
+	setGdt(gdt, sizeof(gdt)); // gdt is set in bootloader, here reset gdt in kernel
 
 	/* initialize TSS */
 	tss.ss0 = KSEL(SEG_KDATA);
 #ifdef PAGE_ENABLED
-	tss.cr3 = pcb[0].pageDir;
+	tss.cr3 = (uint32_t)kernelPageDir.content;
 #endif
 	asm volatile("ltr %%ax":: "a" (KSEL(SEG_TSS)));
-
 	/* reassign segment register */
 	asm volatile("movw %%ax,%%ds":: "a" (KSEL(SEG_KDATA)));
 	asm volatile("movw %%ax,%%ss":: "a" (KSEL(SEG_KDATA)));
 
 	lLdt(0);
+
+	putStr("leave initSeg()\n");
 }
 
 uint32_t loadUMain();
@@ -187,12 +222,6 @@ void initProc() {
 	int i = 0;
 	for (i = 0; i < MAX_PCB_NUM; i++) {
 		pcb[i].state = STATE_DEAD;
-#ifdef PAGE_ENABLED
-		if(i) { //pcb[0] has been initialized above in initPage().
-			pcb[i].pageDir = kernelPageDir + i;
-			*pcb[i].pageDir =PAGE_DESC_BUILD(0,1,0,1,(unsigned int)&pcb[i].pageTb);
-		}
-#endif
 	}
 	for(i = 0;i < MAX_PCB_NUM; i++){
 			runnableNxt[i] = -1;
@@ -203,7 +232,7 @@ void initProc() {
 	freeFirst = 0;
 	freeNxt[MAX_PCB_NUM - 1] = -1;
 	// kernel process
-	pcb[0].stackTop = (uint32_t)&(pcb[0].stackTop);//这里最好像这样减8对齐，虽然影响不大...
+	pcb[0].stackTop = (uint32_t)&(pcb[0].stackTop);
 	pcb[0].state = STATE_RUNNING;
 	pcb[0].timeCount = MAX_TIME_COUNT;
 	pcb[0].sleepTime = 0;
@@ -223,13 +252,13 @@ void initProc() {
 	pcb[1].regs.fs = USEL(4);
 	pcb[1].regs.gs = USEL(4);
 #else
-	allocateStack(pid)
-	pcb[1].regs.ss = USER_DATA_SEG;
-	pcb[1].regs.cs = USER_CODE_SEG;
-	pcb[1].regs.ds = USER_DATA_SEG;
-	pcb[1].regs.es = USER_DATA_SEG;
-	pcb[1].regs.fs = USER_DATA_SEG;
-	pcb[1].regs.gs = USER_DATA_SEG;
+	allocateStack(1);
+	pcb[1].regs.ss = USEL(SEG_UDATA);
+	pcb[1].regs.cs = USEL(SEG_UCODE);
+	pcb[1].regs.ds = USEL(SEG_UDATA);
+	pcb[1].regs.es = USEL(SEG_UDATA);
+	pcb[1].regs.fs = USEL(SEG_UDATA);
+	pcb[1].regs.gs = USEL(SEG_UDATA);
 #endif
 	pcb[1].regs.esp = 0x100000;
 	pcb[1].regs.eip = loadUMain();
@@ -274,6 +303,7 @@ void *loadmemset(void *dst,unsigned char ch,unsigned len){
 
 
 //把elf文件加载到Pysaddr开始的地址，即将加载的程序以编号为Secstart的扇区开始，占据Secnum个扇区（LBA），传入的entry是个指针
+#ifndef PAGE_ENABLED
 int loadelf(uint32_t Secstart, uint32_t Secnum,uint32_t Pysaddr,uint32_t *entry){
 	int i = 0;
 	int phoff = 0x34;
@@ -292,21 +322,51 @@ int loadelf(uint32_t Secstart, uint32_t Secnum,uint32_t Pysaddr,uint32_t *entry)
 	for(i = 0; i < phnum; i++){
 		thisph = ((struct ProgramHeader *)(elf + phoff) + i);
 		if(thisph->type == PT_LOAD){
-#ifndef PAGE_ENABLED
 			loadmemcpy((void *)Pysaddr + thisph->vaddr, ((void *)elf+thisph->off), thisph->filesz);
 			loadmemset((void *)Pysaddr + thisph->vaddr+thisph->filesz, 0, thisph->memsz-thisph->filesz);
-#else
-			allcatePageFrame(pid,thisph->vaddr,thisph->memsz,ph_w(thisph->flags)); // allocate space for the PT_LOAD contents first, macro ph_w judge whether writable or not
-			//Inside kernel, all page tables are reachable.
-			uint32_t kernelVaddr = (pid << 22) | thisph->vaddr;
-			loadmemcpy((void *)kernelVaddr, ((void *)elf+thisph->off), thisph->filesz);
-			loadmemset((void *)kernelVaddr+thisph->filesz, 0, thisph->memsz-thisph->filesz);
-#endif
 		}
 	}
 	return 0;
 }
+#else
+int loadelf(uint32_t Secstart, uint32_t Secnum,uint32_t pid,uint32_t *entry){
+	int i = 0;
+	int phoff = 0x34;
+	int phnum = 0;
+	char buf[Secnum*512];
+	unsigned int elf = (unsigned int)buf;
+	struct ProgramHeader *thisph = 0x0;
 
+	for (i = 0; i < Secnum; i++) {
+		readSect((void*)(elf + i*512), Secstart + i);
+	}
+
+	*entry = (uint32_t)((struct ELFHeader *)elf)->entry;
+	phoff = ((struct ELFHeader *)elf)->phoff;
+	phnum = ((struct ELFHeader *)elf)->phnum;
+	for(i = 0; i < phnum; i++){
+		thisph = ((struct ProgramHeader *)(elf + phoff) + i);
+		if(thisph->type == PT_LOAD){
+			allocatePageFrame(pid,thisph->vaddr,thisph->memsz,ph_w(thisph->flags)); // allocate space for the PT_LOAD contents first, macro ph_w judge whether writable or not
+			// Inside kernel, all page tables are reachable.
+			uint32_t kernelVaddr = ((pid+1) << 22) | thisph->vaddr;
+			loadmemcpy((void *)kernelVaddr, ((void *)elf+thisph->off), thisph->filesz);
+			loadmemset((void *)kernelVaddr+thisph->filesz, 0, thisph->memsz-thisph->filesz);
+		}
+	}
+	freshPageFrame(pid,2);
+	for(i = 0; i < phnum; i++){
+		thisph = ((struct ProgramHeader *)(elf + phoff) + i);
+		if(thisph->type == PT_LOAD){
+			// Inside kernel, all page tables are reachable.
+			uint32_t kernelVaddr = ((2) << 22) | thisph->vaddr;
+			loadmemcpy((void *)kernelVaddr, ((void *)elf+thisph->off), thisph->filesz);
+			loadmemset((void *)kernelVaddr+thisph->filesz, 0, thisph->memsz-thisph->filesz);
+		}
+	}
+	return 0;
+}
+#endif
 
 uint32_t loadUMain(){
 	uint32_t entry = 0;

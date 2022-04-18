@@ -1,7 +1,9 @@
 #ifndef __X86_MEMORY_H__
 #define __X86_MEMORY_H__
 
-//#define PAGE_ENABLED
+#define PAGE_ENABLED
+
+#define DEBUG
 
 #define DPL_KERN                0
 #define DPL_USER                3
@@ -19,16 +21,14 @@
 // GDT entries
 #ifdef PAGE_ENABLED
 	#define NR_SEGMENTS 6
-	#define KERN_CODE_SEG 1
-	#define KERN_DATA_SEG 2
-	#define USER_CODE_SEG 3
-	#define USER_DATA_SEG 4
+	#define SEG_UCODE 3
+	#define SEG_UDATA 4
 	#define PAGE_SIZE 0x1000
 	#define MAX_PROC_SIZE 0x100000
 	#define STACK_SIZE 0x60000
 	#define NR_PAGES_PER_PROC 0x100
 
-	#define PAGE_DESC_BUILD(desc, p,rw,us,base) (desc| p | (rw<<1) | (us<<2) | (base<<20))
+	#define PAGE_DESC_BUILD(desc, p,rw,us,base) (desc| p | (rw<<1) | (us<<2) | (base&0xfffff000))
 #else
 	#define NR_SEGMENTS      10           // GDT size
 #endif
@@ -63,24 +63,30 @@ struct StackFrame {
 
 
 #ifdef PAGE_ENABLED 
-struct PageDescriptor{
-	uint32_t p			 : 1;
-	uint32_t rw 			: 1;
-	uint32_t us			 : 1;
-	uint32_t pwt			 : 1;
-	uint32_t pcd 			: 1;
-	uint32_t access 			: 1;
-	uint32_t dirty 			: 1;
-	union{
-		uint32_t zero 			: 2;
-		struct{
-			uint32_t real_rw		:1;
-			uint32_t dontcare		:1;
-		};
-	}
-	uint32_t avl 			: 3;
-	uint32_t base 			: 20;
-}
+union PageDescriptor{
+	struct{
+		uint32_t val;
+	};
+	struct{
+		uint32_t p			 : 1;
+		uint32_t rw 			: 1;
+		uint32_t us			 : 1;
+		uint32_t pwt			 : 1;
+		uint32_t pcd 			: 1;
+		uint32_t access 			: 1;
+		uint32_t dirty 			: 1;
+		// real_rw and dontcare is actually zero:0 in real linux descriptor
+		uint32_t real_rw		:1;
+		uint32_t dontcare		:1;
+		uint32_t avl 			: 3;
+		uint32_t base 			: 20;
+	};
+};
+typedef union PageDescriptor PageDescriptor;
+struct PageFrame{
+	PageDescriptor content[1024];
+};
+typedef struct PageFrame PageFrame;
 #endif
 
 
@@ -96,7 +102,9 @@ struct PageDescriptor{
 #define STATE_RUNNING 1
 #define STATE_BLOCKED 2
 #define STATE_DEAD 3
+#ifdef PAGE_ENABLED
 #define STATE_ZOMBIE 4 
+#endif
 
 #define MAX_TIME_COUNT 16
 
@@ -111,7 +119,6 @@ struct ProcessTable {
 	char name[32];
 
 #ifdef PAGE_ENABLED
-	PageDescriptor* pageDir;
 	PageDescriptor pageTb[NR_PAGES_PER_PROC];
 	uint32_t procSize;
 	int busyPageFrameFirst;

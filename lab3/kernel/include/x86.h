@@ -8,5 +8,8 @@
 
 void initSeg(void);
 void initProc(void);
+#ifdef PAGE_ENABLED
+void initPage(void);
+#endif
 
 #endif

@@ -1,5 +1,6 @@
 {
     "files.associations": {
-        "x86.h": "c"
+        "x86.h": "c",
+        "device.h": "c"
     }
 }

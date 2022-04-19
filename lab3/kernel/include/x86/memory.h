@@ -86,7 +86,7 @@ typedef union PageDescriptor PageDescriptor;
 struct PageFrame{
 	PageDescriptor content[1024];
 };
-typedef struct PageFrame PageFrame;
+typedef struct PageFrame PageFrame __attribute__ ((aligned (0x1000))); // set align type for page tables
 #endif
 
 

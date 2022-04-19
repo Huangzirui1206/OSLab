@@ -2,10 +2,12 @@
 #include "x86.h"
 #include "device.h"
 
+#ifndef PAGE_ENABLED
 #define va_to_pa(va) (va + (current + 1) * 0x100000)
 #define pa_to_va(pa) (pa - (current + 1) * 0x100000)
 #define desc_to_pbase(desc) ((desc+1)*0x100000 ) 
 #define proc_size 0x100000
+#endif
 
 extern TSS tss;
 extern int displayRow;

@@ -98,7 +98,7 @@ void clearPageTable(uint32_t pid){
 	pcb[pid].procSize = 0;
 }
 
-inline void freshPageFrame(int num, int pf){
+void freshPageFrame(int num, int pf){
 	for(int i = 0; i<NR_PAGES_PER_PROC; i++){
 		pageFrame[pf].content[i] = pcb[num].pageTb[i];
 	}
@@ -151,7 +151,7 @@ void initPage(){//set up page frames
 	pcb[0].procSize = MAX_PROC_SIZE ;
 	for(i=0;i<NR_PAGES_PER_PROC;i++){
 		pcb[0].pageTb[i].val = PAGE_DESC_BUILD(0,1,1,0,pf_to_pa(i));
-		pageFrame[1].content[i].val = PAGE_DESC_BUILD(0,1,1,0,pf_to_pa(i));
+		pageFrame[1].content[i + NR_PAGES_PER_PROC].val = PAGE_DESC_BUILD(0,1,1,0,pf_to_pa(i));
  	}
 	pcb[0].procSize += MAX_PROC_SIZE;
 	freePageFrameFirst = NR_PAGES_PER_PROC;
@@ -161,7 +161,7 @@ void initPage(){//set up page frames
 	putStr("kernelPageDir addr: ");
 	putNumX((uint32_t)kernelPageDir.content);
 	putStr("   pageFrame[1]: ");
-	putNumX(pageFrame[1].content);
+	putNumX((uint32_t)pageFrame[0].content);
 	putChar('\n');
 	eax_get_eip();
 	asm volatile("movl %0,%%eax":"=m"(kern_cr3));

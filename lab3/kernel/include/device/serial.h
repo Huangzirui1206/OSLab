@@ -4,7 +4,7 @@
 void initSerial(void);
 void putChar(char);
 void putNum(int);
-void putNumX(int);
+void putNumX(uint32_t);
 void putStr(const char*);
 #define SERIAL_PORT  0x3F8
 

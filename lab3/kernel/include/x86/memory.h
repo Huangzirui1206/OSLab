@@ -1,9 +1,9 @@
 #ifndef __X86_MEMORY_H__
 #define __X86_MEMORY_H__
 
-#define PAGE_ENABLED
+//#define PAGE_ENABLED
 
-#define DEBUG
+//#define DEBUG
 
 #define DPL_KERN                0
 #define DPL_USER                3
@@ -120,6 +120,7 @@ struct ProcessTable {
 
 #ifdef PAGE_ENABLED
 	PageDescriptor pageTb[NR_PAGES_PER_PROC];
+	// Next 4 members should not be copied when create a thread or child-process. 
 	uint32_t procSize;
 	int busyPageFrameFirst;
 	uint32_t active_mm;//other:copy_on_write; pid:reserve own memory

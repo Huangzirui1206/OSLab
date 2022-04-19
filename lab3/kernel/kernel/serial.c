@@ -36,11 +36,11 @@ void putNum(int num){
     while(*p) putChar(*(p++));  
 } 
 
-void putNumX(int num){
+void putNumX(uint32_t num){
 	 static char buf[30] = { 0 };  
     char* p = buf + sizeof(buf) - 1;  
     if (num == 0){ putChar('0'); return;}  
-    if (num < 0){ putChar('-'); num = -num;}  
+   // if (num < 0){ putChar('-'); num = -num;}  
     while(num){ 
 		int i =  (num % 16);
 		if(i<10){

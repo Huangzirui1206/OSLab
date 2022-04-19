@@ -141,6 +141,7 @@ void initPage(){//set up page frames
 	freePageFrameCnt = nr_pageFrame;
 	for(i=0;i<MAX_PCB_NUM;i++){
 		clearPageTable(i);
+		pcb[i].busyPageFrameFirst = -1;
 		pcb[i].procSize = 0;
 		pcb[i].active_mm = i;
 		pcb[i].copyNum = 0;

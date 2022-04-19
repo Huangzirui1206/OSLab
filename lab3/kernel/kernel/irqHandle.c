@@ -93,6 +93,7 @@ static void switchProc(uint32_t num){
 	int tmpStackTop=pcb[num].stackTop;
     tss.esp0=(uint32_t)&(pcb[num].stackTop); //use as kernel stack
 	eax_get_eip();
+	asm volatile("movl %0,%%eax":"=m"(current));
     asm volatile("movl %0,%%esp"::"m"(tmpStackTop));
     asm volatile("popl %gs");
     asm volatile("popl %fs");
@@ -111,11 +112,11 @@ static void pageTableReadOnly(uint32_t pid){
 	}
 } 
 
-static void procPageTableCopy(uint32_t dst, uint32_t src){
+/*static void procPageTableCopy(uint32_t dst, uint32_t src){
 	for(int i = 0;i<NR_PAGES_PER_PROC;i++){
 		pcb[dst].pageTb[i] = pcb[src].pageTb[i];
 	}
-}
+}*/
 #endif
 
 static void do_exit(uint32_t num){
@@ -193,6 +194,9 @@ void PageFaultHandle(struct StackFrame *sf){
 	uint32_t fault_addr;
 	asm volatile("movl %cr2,%eax");
 	asm volatile("movl %%eax, %0":"=m"(fault_addr));
+	//assert(fault_addr<=0x100000);
+	//putNumX(fault_addr);
+	//putChar('\n');
 	fault_addr = (fault_addr & 0x003ff000)>>12;
 	// check present
 	if(pcb[current].pageTb[fault_addr].p==0){
@@ -208,6 +212,7 @@ void PageFaultHandle(struct StackFrame *sf){
 		assert(0);
 	}
 	// copy-on-write
+	//putStr("I've been to here.\n");
 	if(pcb[current].active_mm != pcb[current].pid){
 		allocatePageFrame(current,fault_addr,PAGE_SIZE,1);
 		pcb[active_pcb].pageTb[fault_addr].rw = 1;
@@ -234,7 +239,6 @@ void PageFaultHandle(struct StackFrame *sf){
 }
 
 void timerHandle(struct StackFrame *sf){
-	putStr("Time Out!\n");
 	//handle sleep precesses
 	for(int i =0;i<MAX_PCB_NUM;i++){
 		if(pcb[i].sleepTime)pcb[i].sleepTime--;
@@ -353,6 +357,16 @@ void memcpy(void* dst,void* src,size_t size){
 }
 
 void syscallFork(struct StackFrame *sf){
+	asm volatile("movl %0,%%eax":"=m"(sf->ebp));
+	uint32_t num;
+	asm volatile("movl %%eax,%0":"=m"(num));
+	putNumX(num);
+	putChar('\n');
+	asm volatile("movl %0,%%ebx":"=m"(num));
+	asm volatile("movl (%ebx),%eax");
+	asm volatile("movl %%eax,%0":"=m"(num));
+	putNumX(num);
+	putChar('\n');
 	//search for free pcb, if there is not, return -1 to father process
 	int i=freeDequeue();
 	sf->eax = i;
@@ -364,10 +378,12 @@ void syscallFork(struct StackFrame *sf){
 #else
 	// copy_on_write
 	pageTableReadOnly(current);
+	memcpy(&pcb[i],&pcb[current],sizeof(ProcessTable) - 4 * sizeof(int));
 	pcb[i].active_mm = current;
 	pcb[current].copyNum +=1; 
-	// copy page tables
-	procPageTableCopy(i,current);
+	//fresh Page Table and TLB
+	freshPageFrame(current,0);
+	tss.cr3 = (uint32_t)pageDir.content;
 #endif	
 	// return 0 to child process
 	pcb[i].regs.eax = 0;
@@ -378,21 +394,13 @@ void syscallFork(struct StackFrame *sf){
 	pcb[i].regs.fs = USEL(2 + i * 2);
 	pcb[i].regs.gs = USEL(2 + i * 2);
 	pcb[i].regs.ss = USEL(2 + i * 2);
-#else
-	pcb[i].regs.cs = USEL(SEG_UCODE);
-	pcb[i].regs.ds = USEL(SEG_UDATA);
-	pcb[i].regs.es = USEL(SEG_UDATA);
-	pcb[i].regs.fs = USEL(SEG_UDATA);
-	pcb[i].regs.gs = USEL(SEG_UDATA);
-	pcb[i].regs.ss = USEL(SEG_UDATA);
 #endif
-	pcb[i].regs.eip = pcb[current].regs.eip;
-	pcb[i].regs.esp = pcb[current].regs.esp;
 	pcb[i].stackTop = (uint32_t)&(pcb[i].regs);
 	pcb[i].state = STATE_RUNNABLE;
 	runnableEnqueue(i);
 	pcb[i].timeCount = MAX_TIME_COUNT - pcb[i].timeCount;
 	pcb[i].sleepTime = 0;
+	eax_get_eip();
 	pcb[i].pid = i;
 }	
 

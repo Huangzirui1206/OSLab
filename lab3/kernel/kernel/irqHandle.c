@@ -21,6 +21,8 @@ extern int current; // current process
 extern int freeFirst;
 extern int freeNxt[MAX_PCB_NUM]; //for allocating free pcb to a new precess
 
+extern void eax_get_eip();
+
 #ifdef PAGE_ENABLED
 extern void releaseBusyPage(int busyPageFrameFirst);
 extern void allocatePageFrame(uint32_t pid, uint32_t vaddr, uint32_t size, uint32_t rw);
@@ -29,8 +31,6 @@ extern void clearPageTable(uint32_t pid);
 extern void freshPageFrame(int num, int pf);
 extern PageFrame pageDir; 
 extern PageFrame pageFrame;
-
-extern void eax_get_eip();
 #endif
 
 static void runnableEnqueue(uint32_t num){
@@ -82,6 +82,9 @@ void syscallExit(struct StackFrame *sf);
 
 
 static void switchProc(uint32_t num){
+	putStr("Process switches to pid:");
+	putNum(num);
+	putChar('\n');
 	current = num;
 	pcb[current].state = STATE_RUNNING;
 #ifdef PAGE_ENABLED
@@ -89,6 +92,7 @@ static void switchProc(uint32_t num){
 #endif
 	int tmpStackTop=pcb[num].stackTop;
     tss.esp0=(uint32_t)&(pcb[num].stackTop); //use as kernel stack
+	eax_get_eip();
     asm volatile("movl %0,%%esp"::"m"(tmpStackTop));
     asm volatile("popl %gs");
     asm volatile("popl %fs");
@@ -183,6 +187,7 @@ putStr(" in process ");\
 putNum(pid);\
 putChar('\n');
 #endif
+
 void PageFaultHandle(struct StackFrame *sf){
 #ifdef PAGE_ENABLED
 	uint32_t fault_addr;
@@ -229,6 +234,7 @@ void PageFaultHandle(struct StackFrame *sf){
 }
 
 void timerHandle(struct StackFrame *sf){
+	putStr("Time Out!\n");
 	//handle sleep precesses
 	for(int i =0;i<MAX_PCB_NUM;i++){
 		if(pcb[i].sleepTime)pcb[i].sleepTime--;
@@ -287,16 +293,28 @@ void syscallWrite(struct StackFrame *sf) {
 }
 
 void syscallPrint(struct StackFrame *sf) {
+#ifndef PAGE_ENABLED
 	int sel = sf->ds; // segment selector for user data, need further modification
+#endif
 	char *str = (char*)sf->edx;
 	int size = sf->ebx;
 	int i = 0;
 	int pos = 0;
 	char character = 0;
 	uint16_t data = 0;
+#ifndef PAGE_ENABLED
 	asm volatile("movw %0, %%es"::"m"(sel));
+#else
+	freshPageFrame(current , 2);
+	str += 0x200000;
+	pageFrame.content[0xb8].val = PAGE_DESC_BUILD(0,1,1,0,0xb8000);
+#endif
 	for (i = 0; i < size; i++) {
+#ifndef PAGE_ENABLED
 		asm volatile("movb %%es:(%1), %0":"=r"(character):"r"(str+i));
+#else
+		asm volatile("movb (%1), %0":"=r"(character):"r"(str+i));
+#endif
 		if(character == '\n') {
 			displayRow++;
 			displayCol=0;
@@ -368,6 +386,8 @@ void syscallFork(struct StackFrame *sf){
 	pcb[i].regs.gs = USEL(SEG_UDATA);
 	pcb[i].regs.ss = USEL(SEG_UDATA);
 #endif
+	pcb[i].regs.eip = pcb[current].regs.eip;
+	pcb[i].regs.esp = pcb[current].regs.esp;
 	pcb[i].stackTop = (uint32_t)&(pcb[i].regs);
 	pcb[i].state = STATE_RUNNABLE;
 	runnableEnqueue(i);

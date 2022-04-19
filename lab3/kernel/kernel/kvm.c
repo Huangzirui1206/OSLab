@@ -13,15 +13,15 @@ TSS tss;
 	int freePageFrameFirst;
 	uint32_t freePageFrameCnt;
 
-	PageFrame kernelPageDir; // only page[0],page[1],page[2] is used
-	PageFrame pageFrame[3];
-	PageFrame userPageDir;
+	PageFrame pageDir; // only page[0],page[1],page[2] is used
+	PageFrame pageFrame;
 
 #define ph_w(flag) ((flag&2)>>1)
 #endif
 
-#ifdef DEBUG
+
 void eax_get_eip(){
+#ifdef DEBUG
 	putStr("The eip for break should be ");
 	asm volatile("movl %ebp,%ebx");
 	asm volatile("addl $4,%ebx");
@@ -30,8 +30,9 @@ void eax_get_eip(){
 	asm volatile("movl %%eax,%0":"=m"(eip));
 	putNumX(eip);
 	putChar('\n');
-}
 #endif
+}
+
 
 ProcessTable pcb[MAX_PCB_NUM];
 int runnableFirst;
@@ -80,7 +81,7 @@ void allocatePageFrame(uint32_t pid, uint32_t vaddr, uint32_t size, uint32_t rw)
 	for(i=0;i<cnt;i++){
 		int pf = freePageDequeue();
 		busyPageEnqueue(&pcb[pid].busyPageFrameFirst,pf);
-		pcb[pid].pageTb[vaddr].val = PAGE_DESC_BUILD(0,1,rw,1,pf_to_pa(pf));
+		pcb[pid].pageTb[vaddr + i].val = PAGE_DESC_BUILD(0,1,rw,1,pf_to_pa(pf));
 		pcb[pid].procSize += PAGE_SIZE;
 
 	}
@@ -98,9 +99,11 @@ void clearPageTable(uint32_t pid){
 	pcb[pid].procSize = 0;
 }
 
-void freshPageFrame(int num, int pf){
+void freshPageFrame(int num, int proc){
+	assert(proc == 0 || proc == 2);
+	uint32_t proc_base = proc * NR_PAGES_PER_PROC;
 	for(int i = 0; i<NR_PAGES_PER_PROC; i++){
-		pageFrame[pf].content[i] = pcb[num].pageTb[i];
+		pageFrame.content[proc_base + i] = pcb[num].pageTb[i];
 	}
 }
 #endif
@@ -129,7 +132,6 @@ PAGE_SIZE = 0x1000
 */
 #ifdef PAGE_ENABLED
 void initPage(){//set up page frames
-	putStr("enter initPage()\n");
 	int i;
 	for(i=0;i<nr_pageFrame;i++){
 		pageFrameNxt[i] = i+1;
@@ -144,38 +146,27 @@ void initPage(){//set up page frames
 		pcb[i].copyNum = 0;
 	}
 	//init kernel proc table
-	kernelPageDir.content[0].val =PAGE_DESC_BUILD(0,1,0,0,(unsigned int)pageFrame[1].content); //kernel pageFrame
-	kernelPageDir.content[1].val =PAGE_DESC_BUILD(0,1,0,1,(unsigned int)pageFrame[0].content); //src user pageFrame
-	kernelPageDir.content[2].val =PAGE_DESC_BUILD(0,1,0,1,(unsigned int)pageFrame[2].content); //dst user pageFrame
-	userPageDir.content[0].val = PAGE_DESC_BUILD(0,1,0,1,(unsigned int)pageFrame[0].content); // user pageDir --> user pageFrame
+	pageDir.content[0].val =PAGE_DESC_BUILD(0,1,1,1,(unsigned int)pageFrame.content); //pageDir shared by user and kernel
 	pcb[0].procSize = MAX_PROC_SIZE ;
 	for(i=0;i<NR_PAGES_PER_PROC;i++){
 		pcb[0].pageTb[i].val = PAGE_DESC_BUILD(0,1,1,0,pf_to_pa(i));
-		pageFrame[1].content[i + NR_PAGES_PER_PROC].val = PAGE_DESC_BUILD(0,1,1,0,pf_to_pa(i));
+		pageFrame.content[i + NR_PAGES_PER_PROC].val = PAGE_DESC_BUILD(0,1,1,0,pf_to_pa(i));
  	}
 	pcb[0].procSize += MAX_PROC_SIZE;
 	freePageFrameFirst = NR_PAGES_PER_PROC;
 	freePageFrameCnt -= NR_PAGES_PER_PROC;
 	// enable page
-	uint32_t kern_cr3 = (uint32_t)kernelPageDir.content;
-	putStr("kernelPageDir addr: ");
-	putNumX((uint32_t)kernelPageDir.content);
-	putStr("   pageFrame[1]: ");
-	putNumX((uint32_t)pageFrame[0].content);
-	putChar('\n');
-	eax_get_eip();
-	asm volatile("movl %0,%%eax":"=m"(kern_cr3));
+	uint32_t cr3 = (uint32_t)pageDir.content;
+	putStr("Prevent compiler from optimizing initPage().\n");
+	asm volatile("movl %0,%%eax":"=m"(cr3));
 	asm volatile("movl %eax, %cr3");
 	asm volatile("movl %cr0,%eax");
 	asm volatile("orl $0x80000000, %eax");
 	asm volatile("movl %eax, %cr0");
-	putStr("Arrive here in  initPage(), assert(0) for debug.\n");
-	assert(0);
 }
 #endif
 
 void initSeg() { // setup kernel segements
-	putStr("enter initSeg()\n");
 #ifndef PAGE_ENABLED
 	int i;
 	//gdt[1] and gdt[2]
@@ -204,7 +195,7 @@ void initSeg() { // setup kernel segements
 	/* initialize TSS */
 	tss.ss0 = KSEL(SEG_KDATA);
 #ifdef PAGE_ENABLED
-	tss.cr3 = (uint32_t)kernelPageDir.content;
+	tss.cr3 = (uint32_t)pageDir.content;
 #endif
 	asm volatile("ltr %%ax":: "a" (KSEL(SEG_TSS)));
 	/* reassign segment register */
@@ -370,7 +361,11 @@ int loadelf(uint32_t Secstart, uint32_t Secnum,uint32_t pid,uint32_t *entry){
 
 uint32_t loadUMain(){
 	uint32_t entry = 0;
+#ifndef PAGE_ENABLED
 	loadelf(201, 20, 0x200000, &entry);
+#else
+	loadelf(201,20,1,&entry);
+#endif
 	putStr("loadelf() should not be optimized.\n"); 
 	//额外的运算会让编译器放弃优化这个函数，注释此行可以重现bug
 	return entry;

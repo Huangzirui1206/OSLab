@@ -27,9 +27,10 @@ extern void allocatePageFrame(uint32_t pid, uint32_t vaddr, uint32_t size, uint3
 extern void allocateStack(uint32_t pid);
 extern void clearPageTable(uint32_t pid);
 extern void freshPageFrame(int num, int pf);
-extern PageFrame kernelPageDir; 
-extern PageFrame pageFrame[3];
-extern PageFrame userPageDir; 
+extern PageFrame pageDir; 
+extern PageFrame pageFrame;
+
+extern void eax_get_eip();
 #endif
 
 static void runnableEnqueue(uint32_t num){
@@ -208,7 +209,7 @@ void PageFaultHandle(struct StackFrame *sf){
 	//fresh pageFrame[0]
 	freshPageFrame(current, 0);
 	// fresh TLB
-	tss.cr3 = (uint32_t)userPageDir.content;
+	tss.cr3 = (uint32_t)pageDir.content;
 #else
 	assert(0);
 	return;

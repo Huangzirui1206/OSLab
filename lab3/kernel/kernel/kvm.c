@@ -203,8 +203,6 @@ void initSeg() { // setup kernel segements
 	asm volatile("movw %%ax,%%ss":: "a" (KSEL(SEG_KDATA)));
 
 	lLdt(0);
-
-	putStr("leave initSeg()\n");
 }
 
 uint32_t loadUMain();
@@ -243,6 +241,7 @@ void initProc() {
 	pcb[1].regs.fs = USEL(4);
 	pcb[1].regs.gs = USEL(4);
 #else
+	
 	allocateStack(1);
 	pcb[1].regs.ss = USEL(SEG_UDATA);
 	pcb[1].regs.cs = USEL(SEG_UCODE);
@@ -252,11 +251,10 @@ void initProc() {
 	pcb[1].regs.gs = USEL(SEG_UDATA);
 #endif
 	pcb[1].regs.esp = 0x100000;
-	pcb[1].regs.eip = loadUMain();
+	pcb[1].regs.eip = loadUMain();	
 	asm volatile("pushfl");
 	asm volatile("popl %0":"=r"(pcb[1].regs.eflags));
 	pcb[1].regs.eflags = pcb[1].regs.eflags | 0x200;
-
 	current = 0; // kernel idle process
 	runnableFirst = runnableTail = 1; //user process is waiting in queue
 	freeFirst = 2;
@@ -331,7 +329,6 @@ int loadelf(uint32_t Secstart, uint32_t Secnum,uint32_t pid,uint32_t *entry){
 	for (i = 0; i < Secnum; i++) {
 		readSect((void*)(elf + i*512), Secstart + i);
 	}
-
 	*entry = (uint32_t)((struct ELFHeader *)elf)->entry;
 	phoff = ((struct ELFHeader *)elf)->phoff;
 	phnum = ((struct ELFHeader *)elf)->phnum;
@@ -339,10 +336,6 @@ int loadelf(uint32_t Secstart, uint32_t Secnum,uint32_t pid,uint32_t *entry){
 		thisph = ((struct ProgramHeader *)(elf + phoff) + i);
 		if(thisph->type == PT_LOAD){
 			allocatePageFrame(pid,thisph->vaddr,thisph->memsz,ph_w(thisph->flags)); // allocate space for the PT_LOAD contents first, macro ph_w judge whether writable or not
-			// Inside kernel, all page tables are reachable.
-			uint32_t kernelVaddr = ((pid+1) << 22) | thisph->vaddr;
-			loadmemcpy((void *)kernelVaddr, ((void *)elf+thisph->off), thisph->filesz);
-			loadmemset((void *)kernelVaddr+thisph->filesz, 0, thisph->memsz-thisph->filesz);
 		}
 	}
 	freshPageFrame(pid,2);
@@ -350,7 +343,7 @@ int loadelf(uint32_t Secstart, uint32_t Secnum,uint32_t pid,uint32_t *entry){
 		thisph = ((struct ProgramHeader *)(elf + phoff) + i);
 		if(thisph->type == PT_LOAD){
 			// Inside kernel, all page tables are reachable.
-			uint32_t kernelVaddr = ((2) << 22) | thisph->vaddr;
+			uint32_t kernelVaddr = 0x200000 +  thisph->vaddr;
 			loadmemcpy((void *)kernelVaddr, ((void *)elf+thisph->off), thisph->filesz);
 			loadmemset((void *)kernelVaddr+thisph->filesz, 0, thisph->memsz-thisph->filesz);
 		}

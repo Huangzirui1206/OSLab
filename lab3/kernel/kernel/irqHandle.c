@@ -173,6 +173,16 @@ void GProtectFaultHandle(struct StackFrame *sf) {
 	return;
 }
 
+#ifdef PAGE_ENABLED
+#define pf_error_info(eip,pid,error)\
+putStr("#PF(");\
+putNumX(error);\
+putStr(") at eip: ");\
+putNumX(eip);\
+putStr(" in process ");\
+putNum(pid);\
+putChar('\n');
+#endif
 void PageFaultHandle(struct StackFrame *sf){
 #ifdef PAGE_ENABLED
 	uint32_t fault_addr;
@@ -182,12 +192,14 @@ void PageFaultHandle(struct StackFrame *sf){
 	// check present
 	if(pcb[current].pageTb[fault_addr].p==0){
 		putStr("Page Fault: page doesn't exit! Programme exits with code -1.\n");
+		pf_error_info(sf->eip,current,sf->error)
 		assert(0);
 	}
 	// check if read-only
 	uint32_t active_pcb =  pcb[current].active_mm;
 	if(pcb[active_pcb].pageTb[fault_addr].real_rw == 0){
 		putStr("Page Fault: write on read-only page ! Programme exits with code -1.\n");
+		pf_error_info(sf->eip,current,sf->error)
 		assert(0);
 	}
 	// copy-on-write

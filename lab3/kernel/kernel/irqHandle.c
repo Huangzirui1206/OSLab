@@ -98,11 +98,13 @@ static void switchProc(uint32_t num){
 	if(num!=0) freshPageFrame(current,0);
 	else{
 		enableInterrupt();
-		while (1);
+		while (1)
+			waitForInterrupt();
 	}
 #endif
 	int tmpStackTop=pcb[num].stackTop;
     tss.esp0=(uint32_t)&(pcb[num].stackTop); //use as kernel stack
+	putStr("Avoid switchProc() from being optimized.\n");
 	asm volatile("movl %0,%%eax":"=m"(current));
     asm volatile("movl %0,%%esp"::"m"(tmpStackTop));
     asm volatile("popl %gs");

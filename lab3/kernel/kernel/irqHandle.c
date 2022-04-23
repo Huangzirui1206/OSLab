@@ -28,7 +28,8 @@ extern void releaseBusyPage(int busyPageFrameFirst);
 extern void allocatePageFrame(uint32_t pid, uint32_t vaddr, uint32_t size, uint32_t rw);
 extern void allocateStack(uint32_t pid);
 extern void clearPageTable(uint32_t pid);
-extern void freshPageFrame(int num, int pf);
+extern void freshPageFrame(int pid, int proc);
+extern void copyPageFrame(int src_pid, int dst_pid, int pf);
 extern PageFrame pageDir; 
 extern PageFrame pageFrame;
 #endif
@@ -49,7 +50,16 @@ static void runnableEnqueue(uint32_t num){
 
 static int runnableDequeue(){
 	int oriFirst = runnableFirst;
-	if(runnableFirst!=-1)runnableFirst = runnableNxt[runnableFirst];
+	if(oriFirst!=-1){
+		runnableFirst = runnableNxt[oriFirst];
+		if(runnableFirst==-1)runnableTail = runnableFirst;
+	}
+	if(oriFirst==0 && runnableNxt[0] != -1){
+		oriFirst = runnableFirst;
+		runnableFirst = runnableNxt[oriFirst];
+		if(runnableFirst==-1)runnableTail = runnableFirst;
+		runnableEnqueue(0);
+	}
 	return oriFirst;
 }
 
@@ -110,13 +120,7 @@ static void pageTableReadOnly(uint32_t pid){
 		pcb[pid].pageTb[i].real_rw = pcb[pid].pageTb[i].rw;
 		pcb[pid].pageTb[i].rw = 0;
 	}
-} 
-
-/*static void procPageTableCopy(uint32_t dst, uint32_t src){
-	for(int i = 0;i<NR_PAGES_PER_PROC;i++){
-		pcb[dst].pageTb[i] = pcb[src].pageTb[i];
-	}
-}*/
+}
 #endif
 
 static void do_exit(uint32_t num){
@@ -195,43 +199,44 @@ void PageFaultHandle(struct StackFrame *sf){
 	asm volatile("movl %cr2,%eax");
 	asm volatile("movl %%eax, %0":"=m"(fault_addr));
 	//assert(fault_addr<=0x100000);
-	//putNumX(fault_addr);
-	//putChar('\n');
-	fault_addr = (fault_addr & 0x003ff000)>>12;
+	putChar('f');putChar('a');
+	putNumX(fault_addr);
+	putChar('\n');
+	int fault_pf = (fault_addr & 0x003ff000)>>12;
 	// check present
-	if(pcb[current].pageTb[fault_addr].p==0){
+	if(pcb[current].pageTb[fault_pf].p==0){
 		putStr("Page Fault: page doesn't exit! Programme exits with code -1.\n");
 		pf_error_info(sf->eip,current,sf->error)
 		assert(0);
 	}
 	// check if read-only
 	uint32_t active_pcb =  pcb[current].active_mm;
-	if(pcb[active_pcb].pageTb[fault_addr].real_rw == 0){
+	if(pcb[active_pcb].pageTb[fault_pf].real_rw == 0){
 		putStr("Page Fault: write on read-only page ! Programme exits with code -1.\n");
 		pf_error_info(sf->eip,current,sf->error)
 		assert(0);
 	}
 	// copy-on-write
-	//putStr("I've been to here.\n");
 	if(pcb[current].active_mm != pcb[current].pid){
 		allocatePageFrame(current,fault_addr,PAGE_SIZE,1);
-		pcb[active_pcb].pageTb[fault_addr].rw = 1;
+		copyPageFrame(active_pcb, current,fault_pf);
+		pcb[active_pcb].pageTb[fault_pf].rw = 1;
 	}
 	else if(pcb[current].copyNum != 0){
-		pcb[current].pageTb[fault_addr].rw = 1;
+		pcb[current].pageTb[fault_pf].rw = 1;
 		// O(n)
 		for(int i = 0; i<MAX_PCB_NUM;i++){
 			if(i == current || i == 0)continue;
 			else if(pcb[i].state == STATE_DEAD || pcb[i].state == STATE_ZOMBIE)continue;
-			else if(pcb[i].active_mm == current && pcb[i].pageTb[fault_addr].rw == 0){
-				allocatePageFrame(current,fault_addr,PAGE_SIZE,1);
+			else if(pcb[i].active_mm == current && pcb[i].pageTb[fault_pf].rw == 0){
+				allocatePageFrame(i,fault_addr,PAGE_SIZE,1);
+				// copy page frame
+				copyPageFrame(current, i,fault_pf);
 			}
 		}
 	}
-	//fresh pageFrame[0]
+	//fresh pageFrame and TLB
 	freshPageFrame(current, 0);
-	// fresh TLB
-	tss.cr3 = (uint32_t)pageDir.content;
 #else
 	assert(0);
 	return;
@@ -309,10 +314,10 @@ void syscallPrint(struct StackFrame *sf) {
 #ifndef PAGE_ENABLED
 	asm volatile("movw %0, %%es"::"m"(sel));
 #else
-	freshPageFrame(current , 2);
-	str += 0x200000;
-	pageFrame.content[0xb8].val = PAGE_DESC_BUILD(0,1,1,0,0xb8000);
+	pageFrame.content[0x2b8].val = PAGE_DESC_BUILD(0,1,1,0,0xb8000);
 #endif
+	putChar('b');putChar('p');
+	eax_get_eip();
 	for (i = 0; i < size; i++) {
 #ifndef PAGE_ENABLED
 		asm volatile("movb %%es:(%1), %0":"=r"(character):"r"(str+i));
@@ -331,7 +336,11 @@ void syscallPrint(struct StackFrame *sf) {
 		else {
 			data = character | (0x0c << 8);
 			pos = (80*displayRow+displayCol)*2;
+#ifndef PAGE_ENABLED
 			asm volatile("movw %0, (%1)"::"r"(data),"r"(pos+0xb8000));
+#else
+			asm volatile("movw %0, (%1)"::"r"(data),"r"(pos+0x2b8000));
+#endif
 			displayCol++;
 			if(displayCol==80){
 				displayRow++;
@@ -347,6 +356,8 @@ void syscallPrint(struct StackFrame *sf) {
 	}
 	updateCursor(displayRow, displayCol);
 	sf->eax=size;
+	putChar('p');
+	eax_get_eip();
 	return;
 }	
 
@@ -377,6 +388,10 @@ void syscallFork(struct StackFrame *sf){
 	memcpy(&pcb[i],&pcb[current],sizeof(ProcessTable));
 #else
 	// copy_on_write
+	putNumX((uint32_t)&current);
+	putChar('\n');
+	putNumX((uint32_t)&pcb[1].pageTb);
+	putChar('\n');
 	pageTableReadOnly(current);
 	memcpy(&pcb[i],&pcb[current],sizeof(ProcessTable) - 4 * sizeof(int));
 	pcb[i].active_mm = current;
@@ -400,6 +415,7 @@ void syscallFork(struct StackFrame *sf){
 	runnableEnqueue(i);
 	pcb[i].timeCount = MAX_TIME_COUNT - pcb[i].timeCount;
 	pcb[i].sleepTime = 0;
+	putChar('f');
 	eax_get_eip();
 	pcb[i].pid = i;
 }	
@@ -437,6 +453,9 @@ void syscallExec(struct StackFrame *sf) {
 }
 
 void syscallSleep(struct StackFrame *sf){
+	putChar('e');
+	putChar('s');
+	eax_get_eip();
 	pcb[current].state = STATE_BLOCKED;
 	pcb[current].sleepTime = sf->ecx;
 	pcb[current].timeCount = 0;
@@ -450,6 +469,11 @@ void syscallSleep(struct StackFrame *sf){
 	}
 	pcb[current].state = STATE_BLOCKED;
 	//switch process
+	putChar('n');
+	putNum(nxtProc);
+	putChar('\n');
+	putChar('s');
+	eax_get_eip();
     switchProc(nxtProc);
 }	
 

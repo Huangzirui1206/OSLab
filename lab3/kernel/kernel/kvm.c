@@ -99,11 +99,33 @@ void clearPageTable(uint32_t pid){
 	pcb[pid].procSize = 0;
 }
 
-void freshPageFrame(int num, int proc){
-	assert(proc == 0 || proc == 2);
+void freshPageFrame(int pid, int proc){
+	if(pid==0)return;
+	assert(proc == 0 || proc == 2 || proc == 3);
 	uint32_t proc_base = proc * NR_PAGES_PER_PROC;
 	for(int i = 0; i<NR_PAGES_PER_PROC; i++){
-		pageFrame.content[proc_base + i] = pcb[num].pageTb[i];
+		pageFrame.content[proc_base + i] = pcb[pid].pageTb[i];
+	}
+	tss.cr3 = (uint32_t)pageDir.content;
+	putStr("To fresh TLB, reset cr3.\n");
+	asm volatile("movl %0,%%eax":"=m"(tss.cr3));
+	asm volatile("movl %eax, %cr3");
+}
+
+void copyPageFrame(int src_pid, int dst_pid, int pf){
+	assert(src_pid>=0&&src_pid<MAX_PCB_NUM);
+	assert(dst_pid>=0&&dst_pid<MAX_PCB_NUM);
+	assert(pf>=0&&pf<=NR_PAGES_PER_PROC);
+	// use spare proc pageFrames 
+	int src_pf = 2 * NR_PAGES_PER_PROC + pf;
+	int dst_pf = 3 * NR_PAGES_PER_PROC + pf;
+	pageFrame.content[src_pf].val = pcb[src_pid].pageTb[pf].val;
+	pageFrame.content[dst_pf].val = pcb[dst_pid].pageTb[pf].val;
+	// copy contents in pageFrame
+	char* src = (char*)(src_pf<<12);
+	char* dst = (char*)(dst_pf<<12);
+	for(int i = 0;i<PAGE_SIZE;i++){
+		dst[i] = src[i];
 	}
 }
 #endif

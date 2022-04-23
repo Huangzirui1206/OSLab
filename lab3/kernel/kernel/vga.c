@@ -20,6 +20,8 @@ void clearScreen() {
 	uint16_t data = 0 | (0x0c << 8);
 	for (i = 0; i < 80 * 25; i++) {
 		pos = i * 2;
+		// In page management, this function is used before PG is set, so the vga base remain 0xb8000
+		// This part should set a macro, but I'm too lazy to do that
 		asm volatile("movw %0, (%1)"::"r"(data),"r"(pos+0xb8000));
 	}
 }
@@ -39,17 +41,29 @@ void scrollScreen() {
 	uint16_t data = 0;
 	for (i = 0; i < 80 * 25; i++) {
 		pos = i * 2;
+#ifndef PAGE_ENABLED
 		asm volatile("movw (%1), %0":"=r"(data):"r"(pos+0xb8000));
+#else
+		asm volatile("movw (%1), %0":"=r"(data):"r"(pos+0x2b8000));
+#endif
 		displayMem[i] = data;
 	}
 	for (i = 0; i < 80 * 24; i++) {
 		pos = i * 2;
 		data = displayMem[i+80];
+#ifndef PAGE_ENABLED
 		asm volatile("movw %0, (%1)"::"r"(data),"r"(pos+0xb8000));
+#else
+		asm volatile("movw %0, (%1)"::"r"(data),"r"(pos+0x2b8000));
+#endif
 	}
 	data = 0 | (0x0c << 8);
 	for (i = 80 * 24; i < 80 * 25; i++) {
 		pos = i * 2;
+#ifndef PAGE_ENABLED
 		asm volatile("movw %0, (%1)"::"r"(data),"r"(pos+0xb8000));
+#else
+		asm volatile("movw %0, (%1)"::"r"(data),"r"(pos+0x2b8000));
+#endif
 	}
 }

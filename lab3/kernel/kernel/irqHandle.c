@@ -102,6 +102,11 @@ static void switchProc(uint32_t num){
 			waitForInterrupt();
 	}
 #else
+	if(num==0) {
+		enableInterrupt();
+		while (1)
+			waitForInterrupt();
+	}
 	putStr("Avoid switchProc() from being optimized.\n");
 #endif
 	int tmpStackTop=pcb[num].stackTop;
@@ -406,8 +411,10 @@ void syscallExec(struct StackFrame *sf) {
 	uint32_t entry = 0;
 	uint32_t secstart = sf->ecx;
 	uint32_t secnum =  sf->edx;
+	sf->eax = 0;
 #ifndef PAGE_ENABLED
 	loadelf(secstart,secnum,va_to_pa(0),&entry);
+	sf->esp = SEG_SIZE - 0x10; // spare some space for safety
 #else
 	if(pcb[current].copyNum != 0){
 		assert(0);
@@ -423,10 +430,11 @@ void syscallExec(struct StackFrame *sf) {
 	do_exit(current);
 	pcb[current].active_mm = current;
 	pcb[current].state = STATE_RUNNING;
-	loadelf(secstart,secnum,current,&entry); // Don't care Physaddr under page system.
+	loadelf(secstart,secnum,current,&entry); 
 	allocateStack(current);
+	freshPageFrame(current, 0);
+	sf->esp = NR_PAGES_PER_PROC*PAGE_SIZE - 0x10; // spare some space for safety
 #endif
-	sf->esp = SEG_SIZE;
 	sf->eflags = sf->eflags | 0x200;
 	sf->eip = entry;
 	pcb[current].stackTop = (uint32_t)&(pcb[current].regs);

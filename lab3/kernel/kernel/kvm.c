@@ -268,8 +268,8 @@ void initProc() {
 	pcb[1].regs.es = USEL(4);
 	pcb[1].regs.fs = USEL(4);
 	pcb[1].regs.gs = USEL(4);
+	pcb[1].regs.esp = SEG_SIZE;
 #else
-	
 	allocateStack(1);
 	pcb[1].regs.ss = USEL(SEG_UDATA);
 	pcb[1].regs.cs = USEL(SEG_UCODE);
@@ -277,8 +277,8 @@ void initProc() {
 	pcb[1].regs.es = USEL(SEG_UDATA);
 	pcb[1].regs.fs = USEL(SEG_UDATA);
 	pcb[1].regs.gs = USEL(SEG_UDATA);
+	pcb[1].regs.esp = NR_PAGES_PER_PROC * PAGE_SIZE;
 #endif
-	pcb[1].regs.esp = 0x100000;
 	pcb[1].regs.eip = loadUMain();	
 	asm volatile("pushfl");
 	asm volatile("popl %0":"=r"(pcb[1].regs.eflags));

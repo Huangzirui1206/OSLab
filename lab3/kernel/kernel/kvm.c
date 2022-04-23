@@ -9,7 +9,8 @@ TSS tss;
 #define pf_to_pa(pf) (PAGE_START+pf*PAGE_SIZE)
 #define nr_pageFrame  (MAX_PCB_NUM*(MAX_PROC_SIZE/PAGE_SIZE))
 
-	int pageFrameNxt[nr_pageFrame];
+	int freePageFrameNxt[nr_pageFrame];
+	int busyPageFrameNxt[nr_pageFrame];
 	int freePageFrameFirst;
 	uint32_t freePageFrameCnt;
 
@@ -45,26 +46,29 @@ int freeNxt[MAX_PCB_NUM]; //for allocating free pcb to a new precess
 #ifdef PAGE_ENABLED
 	static void freePageEnqueue(int pg){
 		assert(pg>=0&&pg<nr_pageFrame);
-		pageFrameNxt[pg] = freePageFrameFirst;
+		freePageFrameNxt[pg] = freePageFrameFirst;
 		freePageFrameFirst = pg;
 	}
 
 	static int freePageDequeue(){
 		int oriFirst = freePageFrameFirst;
-		if(freePageFrameFirst != -1)freePageFrameFirst = pageFrameNxt[freePageFrameFirst];
+		if(freePageFrameFirst != -1)freePageFrameFirst = freePageFrameNxt[freePageFrameFirst];
 		return oriFirst;
 	}
 
 	void busyPageEnqueue(int* busyPageFrameFirst, int pg){
 		assert(pg>=0&&pg<nr_pageFrame);
-		pageFrameNxt[pg] = *busyPageFrameFirst;
+		freePageFrameNxt[pg] = *busyPageFrameFirst;
 		*busyPageFrameFirst = pg;
 	}
 
-	void releaseBusyPage(int busyPageFrameFirst){
-		for(;busyPageFrameFirst!=-1;busyPageFrameFirst = pageFrameNxt[busyPageFrameFirst]){
+	void releaseBusyPage(int* busyPageFrameFirstPtr){
+		int busyPageFrameFirst = *busyPageFrameFirstPtr;
+		for(;busyPageFrameFirst!=-1;busyPageFrameFirst = busyPageFrameNxt[busyPageFrameFirst]){
 			freePageEnqueue(busyPageFrameFirst);
+			busyPageFrameNxt[busyPageFrameFirst] = -1;
 		}
+		*busyPageFrameFirstPtr = -1;
 	}
 #endif
 
@@ -156,9 +160,10 @@ PAGE_SIZE = 0x1000
 void initPage(){//set up page frames
 	int i;
 	for(i=0;i<nr_pageFrame;i++){
-		pageFrameNxt[i] = i+1;
+		freePageFrameNxt[i] = i+1;
+		busyPageFrameNxt[i] = -1;
 	}
-	pageFrameNxt[nr_pageFrame-1] = -1;
+	freePageFrameNxt[nr_pageFrame-1] = -1;
 	freePageFrameFirst = 0;
 	freePageFrameCnt = nr_pageFrame;
 	for(i=0;i<MAX_PCB_NUM;i++){

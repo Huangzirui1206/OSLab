@@ -24,7 +24,7 @@ extern int freeNxt[MAX_PCB_NUM]; //for allocating free pcb to a new precess
 extern void eax_get_eip();
 
 #ifdef PAGE_ENABLED
-extern void releaseBusyPage(int busyPageFrameFirst);
+extern void releaseBusyPage(int* busyPageFrameFirst);
 extern void allocatePageFrame(uint32_t pid, uint32_t vaddr, uint32_t size, uint32_t rw);
 extern void allocateStack(uint32_t pid);
 extern void clearPageTable(uint32_t pid);
@@ -101,10 +101,11 @@ static void switchProc(uint32_t num){
 		while (1)
 			waitForInterrupt();
 	}
+#else
+	putStr("Avoid switchProc() from being optimized.\n");
 #endif
 	int tmpStackTop=pcb[num].stackTop;
     tss.esp0=(uint32_t)&(pcb[num].stackTop); //use as kernel stack
-	putStr("Avoid switchProc() from being optimized.\n");
 	asm volatile("movl %0,%%eax":"=m"(current));
     asm volatile("movl %0,%%esp"::"m"(tmpStackTop));
     asm volatile("popl %gs");
@@ -136,7 +137,7 @@ static void do_exit(uint32_t num){
 			}
 		}
 		clearPageTable(num);
-		releaseBusyPage(pcb[num].busyPageFrameFirst); //Release the process space.
+		releaseBusyPage(&pcb[num].busyPageFrameFirst); //Release the process space.
 		pcb[num].state = STATE_DEAD;
 		freeEnqueue(num);
 	}

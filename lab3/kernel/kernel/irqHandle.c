@@ -92,17 +92,17 @@ void syscallExit(struct StackFrame *sf);
 
 
 static void switchProc(uint32_t num){
-	putStr("Process switches to pid:");
-	putNum(num);
-	putChar('\n');
 	current = num;
 	pcb[current].state = STATE_RUNNING;
 #ifdef PAGE_ENABLED
-	freshPageFrame(current,0);
+	if(num!=0) freshPageFrame(current,0);
+	else{
+		enableInterrupt();
+		while (1);
+	}
 #endif
 	int tmpStackTop=pcb[num].stackTop;
     tss.esp0=(uint32_t)&(pcb[num].stackTop); //use as kernel stack
-	eax_get_eip();
 	asm volatile("movl %0,%%eax":"=m"(current));
     asm volatile("movl %0,%%esp"::"m"(tmpStackTop));
     asm volatile("popl %gs");
@@ -177,6 +177,8 @@ void irqHandle(struct StackFrame *sf) { // pointer sf = esp
 void GProtectFaultHandle(struct StackFrame *sf) {
 	putStr("The general protect fault happened with return ");
 	putNum(sf->error);
+	putStr(" in process ");
+	putNum(current);
 	putChar('\n');
 	assert(0);
 	return;
@@ -198,10 +200,6 @@ void PageFaultHandle(struct StackFrame *sf){
 	uint32_t fault_addr;
 	asm volatile("movl %cr2,%eax");
 	asm volatile("movl %%eax, %0":"=m"(fault_addr));
-	//assert(fault_addr<=0x100000);
-	putChar('f');putChar('a');
-	putNumX(fault_addr);
-	putChar('\n');
 	int fault_pf = (fault_addr & 0x003ff000)>>12;
 	// check present
 	if(pcb[current].pageTb[fault_pf].p==0){
@@ -316,8 +314,6 @@ void syscallPrint(struct StackFrame *sf) {
 #else
 	pageFrame.content[0x2b8].val = PAGE_DESC_BUILD(0,1,1,0,0xb8000);
 #endif
-	putChar('b');putChar('p');
-	eax_get_eip();
 	for (i = 0; i < size; i++) {
 #ifndef PAGE_ENABLED
 		asm volatile("movb %%es:(%1), %0":"=r"(character):"r"(str+i));
@@ -356,8 +352,6 @@ void syscallPrint(struct StackFrame *sf) {
 	}
 	updateCursor(displayRow, displayCol);
 	sf->eax=size;
-	putChar('p');
-	eax_get_eip();
 	return;
 }	
 
@@ -368,16 +362,6 @@ void memcpy(void* dst,void* src,size_t size){
 }
 
 void syscallFork(struct StackFrame *sf){
-	asm volatile("movl %0,%%eax":"=m"(sf->ebp));
-	uint32_t num;
-	asm volatile("movl %%eax,%0":"=m"(num));
-	putNumX(num);
-	putChar('\n');
-	asm volatile("movl %0,%%ebx":"=m"(num));
-	asm volatile("movl (%ebx),%eax");
-	asm volatile("movl %%eax,%0":"=m"(num));
-	putNumX(num);
-	putChar('\n');
 	//search for free pcb, if there is not, return -1 to father process
 	int i=freeDequeue();
 	sf->eax = i;
@@ -388,10 +372,6 @@ void syscallFork(struct StackFrame *sf){
 	memcpy(&pcb[i],&pcb[current],sizeof(ProcessTable));
 #else
 	// copy_on_write
-	putNumX((uint32_t)&current);
-	putChar('\n');
-	putNumX((uint32_t)&pcb[1].pageTb);
-	putChar('\n');
 	pageTableReadOnly(current);
 	memcpy(&pcb[i],&pcb[current],sizeof(ProcessTable) - 4 * sizeof(int));
 	pcb[i].active_mm = current;
@@ -415,8 +395,6 @@ void syscallFork(struct StackFrame *sf){
 	runnableEnqueue(i);
 	pcb[i].timeCount = MAX_TIME_COUNT - pcb[i].timeCount;
 	pcb[i].sleepTime = 0;
-	putChar('f');
-	eax_get_eip();
 	pcb[i].pid = i;
 }	
 
@@ -453,27 +431,13 @@ void syscallExec(struct StackFrame *sf) {
 }
 
 void syscallSleep(struct StackFrame *sf){
-	putChar('e');
-	putChar('s');
-	eax_get_eip();
 	pcb[current].state = STATE_BLOCKED;
 	pcb[current].sleepTime = sf->ecx;
 	pcb[current].timeCount = 0;
 	int nxtProc = runnableDequeue();
-	if(nxtProc == -1){
-		enableInterrupt();
-		while(nxtProc == -1){//no runalbe process
-			nxtProc = runnableDequeue();
-		}
-		disableInterrupt();
-	}
+	assert(nxtProc!=-1);
 	pcb[current].state = STATE_BLOCKED;
 	//switch process
-	putChar('n');
-	putNum(nxtProc);
-	putChar('\n');
-	putChar('s');
-	eax_get_eip();
     switchProc(nxtProc);
 }	
 
@@ -482,12 +446,6 @@ void syscallExit(struct StackFrame *sf){
 	if(error)assert(error!=0);
 	do_exit(current);
 	int nxtProc = runnableDequeue();
-	if(nxtProc == -1){
-		enableInterrupt();
-		while(nxtProc == -1){//no runalbe process
-			nxtProc = runnableDequeue();
-		}
-		disableInterrupt();
-	}
+	assert(nxtProc != -1);
 	switchProc(nxtProc);
 }

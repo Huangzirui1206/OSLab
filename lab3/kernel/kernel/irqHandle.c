@@ -90,6 +90,9 @@ void syscallExec(struct StackFrame *sf);
 void syscallSleep(struct StackFrame *sf);
 void syscallExit(struct StackFrame *sf);
 
+void syscallThreadCreate(struct StackFrame *sf);
+void syscallThreadExit(struct StackFrame *sf);
+void syscallThreadJoin(struct StackFrame *sf);
 
 static void switchProc(uint32_t num){
 	current = num;
@@ -125,6 +128,14 @@ static void switchProc(uint32_t num){
 #ifdef PAGE_ENABLED
 static void pageTableReadOnly(uint32_t pid){
 	for(int i=0;i<NR_PAGES_PER_PROC;i++){
+		pcb[pid].pageTb[i].real_rw = pcb[pid].pageTb[i].rw;
+		pcb[pid].pageTb[i].rw = 0;
+	}
+}
+#endif
+#ifdef PTHREAD_ENABLED
+static void stackPageTableReadOnly(uint32_t pid){
+	for(int i=NR_PAGES_PER_PROC - STACK_SIZE;i<NR_PAGES_PER_PROC;i++){
 		pcb[pid].pageTb[i].real_rw = pcb[pid].pageTb[i].rw;
 		pcb[pid].pageTb[i].rw = 0;
 	}
@@ -201,6 +212,41 @@ putNumX(eip);\
 putStr(" in process ");\
 putNum(pid);\
 putChar('\n');
+
+static int copyOnWrite(uint32_t pid, int fault_addr){
+	int fault_pf = (fault_addr & 0x003ff000)>>12;
+	// check present
+	if(pcb[pid].pageTb[fault_pf].p==0){
+		putStr("Page Fault: page doesn't exit! Programme exits with code -1.\n");
+		return -1;
+	}
+	// check if read-only
+	uint32_t active_pcb =  pcb[pid].active_mm;
+	if(pcb[active_pcb].pageTb[fault_pf].real_rw == 0){
+		putStr("Page Fault: write on read-only page ! Programme exits with code -1.\n");
+		return -1;
+	}
+	// copy-on-write
+	if(pcb[pid].active_mm != pcb[pid].pid){
+		allocatePageFrame(pid,fault_addr,PAGE_SIZE,1);
+		copyPageFrame(active_pcb, pid,fault_pf);
+		pcb[active_pcb].pageTb[fault_pf].rw = 1;
+	}
+	else if(pcb[pid].copyNum != 0){
+		pcb[pid].pageTb[fault_pf].rw = 1;
+		// O(n)
+		for(int i = 0; i<MAX_PCB_NUM;i++){
+			if(i == pid || i == 0)continue;
+			else if(pcb[i].state == STATE_DEAD || pcb[i].state == STATE_ZOMBIE)continue;
+			else if(pcb[i].active_mm == pid && pcb[i].pageTb[fault_pf].rw == 0){
+				allocatePageFrame(i,fault_addr,PAGE_SIZE,1);
+				// copy page frame
+				copyPageFrame(pid, i,fault_pf);
+			}
+		}
+	}
+	return 0;
+}
 #endif
 
 void PageFaultHandle(struct StackFrame *sf){
@@ -208,38 +254,10 @@ void PageFaultHandle(struct StackFrame *sf){
 	uint32_t fault_addr;
 	asm volatile("movl %cr2,%eax");
 	asm volatile("movl %%eax, %0":"=m"(fault_addr));
-	int fault_pf = (fault_addr & 0x003ff000)>>12;
-	// check present
-	if(pcb[current].pageTb[fault_pf].p==0){
-		putStr("Page Fault: page doesn't exit! Programme exits with code -1.\n");
+	int cow = copyOnWrite(current, fault_addr);
+	if(cow == -1){
 		pf_error_info(sf->eip,current,sf->error)
 		assert(0);
-	}
-	// check if read-only
-	uint32_t active_pcb =  pcb[current].active_mm;
-	if(pcb[active_pcb].pageTb[fault_pf].real_rw == 0){
-		putStr("Page Fault: write on read-only page ! Programme exits with code -1.\n");
-		pf_error_info(sf->eip,current,sf->error)
-		assert(0);
-	}
-	// copy-on-write
-	if(pcb[current].active_mm != pcb[current].pid){
-		allocatePageFrame(current,fault_addr,PAGE_SIZE,1);
-		copyPageFrame(active_pcb, current,fault_pf);
-		pcb[active_pcb].pageTb[fault_pf].rw = 1;
-	}
-	else if(pcb[current].copyNum != 0){
-		pcb[current].pageTb[fault_pf].rw = 1;
-		// O(n)
-		for(int i = 0; i<MAX_PCB_NUM;i++){
-			if(i == current || i == 0)continue;
-			else if(pcb[i].state == STATE_DEAD || pcb[i].state == STATE_ZOMBIE)continue;
-			else if(pcb[i].active_mm == current && pcb[i].pageTb[fault_pf].rw == 0){
-				allocatePageFrame(i,fault_addr,PAGE_SIZE,1);
-				// copy page frame
-				copyPageFrame(current, i,fault_pf);
-			}
-		}
 	}
 	//fresh pageFrame and TLB
 	freshPageFrame(current, 0);
@@ -253,7 +271,11 @@ void timerHandle(struct StackFrame *sf){
 	//handle sleep precesses
 	for(int i =0;i<MAX_PCB_NUM;i++){
 		if(pcb[i].sleepTime)pcb[i].sleepTime--;
+#ifndef PTHREAD_ENABLED
 		if(!pcb[i].sleepTime && pcb[i].state == STATE_BLOCKED)runnableEnqueue(i);
+#else
+		if(!pcb[i].sleepTime && pcb[i].join_pid == -1 && pcb[i].state == STATE_BLOCKED)runnableEnqueue(i);
+#endif
 	}
 	//handle precess switch
 	if(pcb[current].state == STATE_RUNNING){
@@ -293,6 +315,16 @@ void syscallHandle(struct StackFrame *sf) {
 			break;
 		case 4:
 			syscallExit(sf);
+			break;
+		// pthread functions
+		case 5:
+			syscallThreadCreate(sf);
+			break;
+		case 6:
+			syscallThreadExit(sf);
+			break;
+		case 7:
+			syscallThreadJoin(sf);
 			break;
 		default:break;
 	}
@@ -373,10 +405,13 @@ void syscallFork(struct StackFrame *sf){
 	//search for free pcb, if there is not, return -1 to father process
 	int i=freeDequeue();
 	sf->eax = i;
-	if(i==-1)return;
+	if(i==-1){
+		sf->eax = -1;
+		return;
+	}
 	//copy segment address space
 #ifndef PAGE_ENABLED
-	memcpy((void*)desc_to_pbase(i),(void*)va_to_pa(0),SEG_SIZE*2);
+	memcpy((void*)desc_to_pbase(i),(void*)va_to_pa(0),SEG_SIZE);
 	memcpy(&pcb[i],&pcb[current],sizeof(ProcessTable));
 #else
 	// copy_on_write
@@ -386,7 +421,6 @@ void syscallFork(struct StackFrame *sf){
 	pcb[current].copyNum +=1; 
 	//fresh Page Table and TLB
 	freshPageFrame(current,0);
-	tss.cr3 = (uint32_t)pageDir.content;
 #endif	
 	// return 0 to child process
 	pcb[i].regs.eax = 0;
@@ -397,6 +431,9 @@ void syscallFork(struct StackFrame *sf){
 	pcb[i].regs.fs = USEL(2 + i * 2);
 	pcb[i].regs.gs = USEL(2 + i * 2);
 	pcb[i].regs.ss = USEL(2 + i * 2);
+#endif
+#ifdef PTHREAD_ENABLED
+	pcb[i].join_pid = -1;
 #endif
 	pcb[i].stackTop = (uint32_t)&(pcb[i].regs);
 	pcb[i].state = STATE_RUNNABLE;
@@ -417,15 +454,9 @@ void syscallExec(struct StackFrame *sf) {
 	sf->esp = SEG_SIZE - 0x10; // spare some space for safety
 #else
 	if(pcb[current].copyNum != 0){
-		assert(0);
-		for(int i = 0;i<MAX_PCB_NUM;i++){
-			if(i==0||i==current) continue;
-			else if(pcb[i].state == STATE_DEAD || pcb[i].state == STATE_ZOMBIE)continue;
-			else if(pcb[i].active_mm == current){
-				//TODO:handle this.
-				
-			}
-		}
+		putStr("The process still has children using its copy, can't exec()\n");
+		sf->eax = -1;
+		return;
 	}
 	do_exit(current);
 	pcb[current].active_mm = current;
@@ -435,6 +466,7 @@ void syscallExec(struct StackFrame *sf) {
 	freshPageFrame(current, 0);
 	sf->esp = NR_PAGES_PER_PROC*PAGE_SIZE - 0x10; // spare some space for safety
 #endif
+	sf->eax = 0;
 	sf->eflags = sf->eflags | 0x200;
 	sf->eip = entry;
 	pcb[current].stackTop = (uint32_t)&(pcb[current].regs);
@@ -459,4 +491,106 @@ void syscallExit(struct StackFrame *sf){
 	int nxtProc = runnableDequeue();
 	assert(nxtProc != -1);
 	switchProc(nxtProc);
+}
+
+// kernel thread
+void syscallThreadCreate(struct StackFrame *sf){
+#ifndef PAGE_ENABLED
+	putStr("Can't invoke pthread.h when macro PAGE_ENABLED is set.\n");
+	sf->eax = -1;
+	return;
+#elif defined PTHREAD_ENABLED
+	//search for free pcb, if there is not, return -1 to father process
+	int i=freeDequeue();
+	sf->eax = i;
+	if(i==-1){
+		sf->eax = -1;
+		return;
+	}
+	// copy_on_write
+	stackPageTableReadOnly(current);
+	memcpy(&pcb[i],&pcb[current],sizeof(ProcessTable) - 4 * sizeof(int));
+	pcb[i].active_mm = current;
+	pcb[current].copyNum +=1; 
+	// return 0 to thread
+	pcb[i].regs.eax = 0;
+	// set thread id 
+	*(uint32_t*)sf->ecx = i;	
+	pcb[i].regs.eip = sf->edx;
+	//build argv
+	pcb[i].regs.esp = NR_PAGES_PER_PROC*PAGE_SIZE- 0x10;
+	int cow = copyOnWrite(i, pcb[i].regs.esp);
+	if(cow == -1){
+		putStr("Copy-On-Write goes wrong in pthread_create.\n");
+		sf->eax = -1;
+		return;
+	}
+	pageFrame.content[0x2ff].val = pcb[i].pageTb[0xff].val;
+	uint32_t argNum  = sf->ebx;
+	uint32_t* argvSrc = (uint32_t*)sf->esi;
+	uint32_t* argvDst = (uint32_t*)(0x200000 + pcb[i].regs.esp - 4 * argNum);
+	//fresh Page Table and TLB
+	freshPageFrame(current,0);
+	for (int i = 0;i<argNum;i++){
+		argvDst[i] = argvSrc[i]; 
+	}
+	pageFrame.content[0x2ff].val = 0;
+	pcb[i].stackTop = (uint32_t)&(pcb[i].regs);
+	pcb[i].state = STATE_RUNNABLE;
+	runnableEnqueue(i);
+	pcb[i].timeCount = MAX_TIME_COUNT - pcb[i].timeCount;
+	pcb[i].sleepTime = 0;
+	pcb[i].pid = i;
+#else
+	putStr("Can't invoke pthread.h when macro PTHREAD_ENABLED is set.\n");
+	sf->eax = -1;
+	return;
+#endif
+}
+
+void syscallThreadExit(struct StackFrame *sf){
+#ifdef PTHREAD_ENABLED
+	// set retval to waiter porcess if there is one.
+	int waiter_pid = pcb[current].waiter_pid;
+	if(waiter_pid>0&&waiter_pid<MAX_PCB_NUM){
+		assert(pcb[waiter_pid].state==STATE_BLOCKED);
+		pcb[waiter_pid].join_retval = sf->ecx;
+		runnableEnqueue(waiter_pid);
+	}
+	sf->eax = 0;
+	// do exit
+	do_exit(current);
+	// Switch proc, int $0x20 is actually better, but here we won't run into nexted interrupt.
+	int nxtProc = runnableDequeue();
+	assert(nxtProc != -1);
+	switchProc(nxtProc);
+#else
+	sf->eax = -1;
+#endif
+}
+
+void syscallThreadJoin(struct StackFrame *sf){
+#ifdef PTHREAD_ENABLED
+	int join_pid = sf->ecx;
+	// handle thread_join failure
+	if(join_pid!=STATE_RUNNABLE&&join_pid!=STATE_BLOCKED){
+		//join failed
+		sf->eax = -1;
+		return;
+	}
+	if(pcb[join_pid].active_mm!=current){
+		//join failed
+		sf->eax = -1;
+		return;
+	}
+	// set join information
+	pcb[current].join_pid = join_pid;
+	pcb[current].state = STATE_BLOCKED;
+	pcb[current].timeCount = 0;
+	asm volatile ("int $0x20"); // To  handle nested interrupt, and switch process
+	*(uint32_t*)sf->edx = pcb[current].join_pid;
+	sf->eax = 0;
+#else	
+	sf->eax = -1;
+#endif
 }

@@ -239,6 +239,11 @@ void initProc() {
 	int i = 0;
 	for (i = 0; i < MAX_PCB_NUM; i++) {
 		pcb[i].state = STATE_DEAD;
+#ifdef PTHREAD_ENABLED
+		pcb[i].join_pid = -1;
+		pcb[i].waiter_pid = -1;
+		pcb[i].join_retval = 0;
+#endif
 	}
 	for(i = 0;i < MAX_PCB_NUM; i++){
 			runnableNxt[i] = -1;

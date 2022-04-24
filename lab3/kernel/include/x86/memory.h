@@ -1,9 +1,13 @@
 #ifndef __X86_MEMORY_H__
 #define __X86_MEMORY_H__
 
-#define PAGE_ENABLED
+//#define PAGE_ENABLED
 
-#define DEBUG
+//#define DEBUG
+
+#ifdef PAGE_ENABLED
+#define PTHREAD_ENABLED
+#endif
 
 #define DPL_KERN                0
 #define DPL_USER                3
@@ -25,7 +29,7 @@
 	#define SEG_UDATA 4
 	#define PAGE_SIZE 0x1000
 	#define MAX_PROC_SIZE 0x100000
-	#define STACK_SIZE 0x60000
+	#define STACK_SIZE 0x6000
 	#define NR_PAGES_PER_PROC 0x100
 
 	#define PAGE_DESC_BUILD(desc, p,rw,us,base) (desc| p | (rw<<1) | (us<<2) | (base&0xfffff000))
@@ -125,6 +129,12 @@ struct ProcessTable {
 	int busyPageFrameFirst;
 	uint32_t active_mm;//other:copy_on_write; pid:reserve own memory
 	uint32_t copyNum;
+#endif
+
+#ifdef  PTHREAD_ENABLED
+	int join_pid;
+	int join_retval;
+	int waiter_pid;
 #endif
 
 	// For kernel thread 

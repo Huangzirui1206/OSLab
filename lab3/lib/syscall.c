@@ -1,5 +1,6 @@
 #include "lib.h"
 #include "types.h"
+#include "pthread.h"
 /*
  * io lib here
  * 库函数写在这
@@ -243,8 +244,18 @@ int sleep(uint32_t time) {
 }
 
 int exit(int error) {
-
 	return syscall(4,error,0,0,0,0); //syscallExit()
 }
 
+// kernel thread
+int pthread_create(pthread_t tid, void* func, uint32_t argNum, ...){
+	return syscall(5,(uint32_t)tid.p,(uint32_t)func,argNum,(uint32_t)(&argNum)+4,0);
+}
 
+int pthread_exit(void  *retval){
+	return syscall(6,(uint32_t)retval,0,0,0,0);
+}
+
+int pthread_join(pthread_t tid, void** value_ptr){
+	return syscall(7,*tid.p,(uint32_t)value_ptr,0,0,0);
+}

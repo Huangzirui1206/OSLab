@@ -3,7 +3,7 @@
 
 //#define PAGE_ENABLED
 
-//#define DEBUG
+#define DEBUG
 
 #ifdef PAGE_ENABLED
 #define PTHREAD_ENABLED

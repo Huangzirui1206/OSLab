@@ -235,8 +235,9 @@ pid_t fork() {
 	return syscall(1,0,0,0,0,0); // syscallFork()
 }
 
-int exec(uint32_t sec_start, uint32_t sec_num){
-	return syscall(2,sec_start,sec_num,0,0,0); //syscallExec()
+int exec(uint32_t sec_start, uint32_t sec_num, uint32_t argNum,...){
+	uint32_t argBase = (uint32_t)(&argNum) + 4;
+	return syscall(2,sec_start,sec_num,argNum,argBase,0); //syscallExec()
 }
 
 int sleep(uint32_t time) {

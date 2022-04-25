@@ -1,7 +1,8 @@
 #include "lib.h"
 #include "types.h"
 
-
+#define TEST_PTHREAD
+#define TEST_EXEC
 
 int uEntry(void) {
 	uint16_t selector;
@@ -21,7 +22,14 @@ int uEntry(void) {
 			//sleep(1);
 			sleep(60);
 		}
-		exec(221, 20);
+// app_exp in disk 241-260. Test exec with argument and kernel thread library.
+#ifdef TEST_PTHREAD
+		exec(241, 20, 1, "Test kernel thread library.\n");
+#elif defined TEST_EXEC
+		exec(241, 20, 0); //argc
+#else
+		exec(221, 20, 0);
+#endif
 		exit(0);
 	}
 	else if (ret != -1) {

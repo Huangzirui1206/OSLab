@@ -448,16 +448,73 @@ void syscallExec(struct StackFrame *sf) {
 	uint32_t entry = 0;
 	uint32_t secstart = sf->ecx;
 	uint32_t secnum =  sf->edx;
+	uint32_t argNum = sf->ebx;
+	assert(argNum<=16);
+	uint32_t* argBase = (uint32_t*)sf->esi;
+	uint32_t argv[16];
 	sf->eax = 0;
 #ifndef PAGE_ENABLED
-	loadelf(secstart,secnum,va_to_pa(0),&entry);
+	int sel = sf->ds; // segment selector for user data, need further modification
+	asm volatile("movw %0, %%es"::"m"(sel));
+	if(argNum){
+		for(int i = 0;i < argNum; i++){
+			asm volatile("movl %%es:(%1), %0":"=r"(argv[i]):"r"(argBase+i));
+		}
+	}
 	sf->esp = SEG_SIZE - 0x10; // spare some space for safety
+	// copy argv to new stack after exec
+	char* str;
+	char* argv_addr = (char*)(SEG_SIZE/2);
+	char ch = '\0';
+	for(int i = 0;i<argNum;i++){
+		str = (char*)argv[i];
+		argv[i] = (uint32_t)argv_addr;
+		do{
+			asm volatile("movb %%es:(%1), %0":"=r"(ch):"r"(str+i));
+			asm volatile("movl %0, %%ebx"::"m"(argv_addr));
+			asm volatile("movb %0,%%es:(%%ebx)"::"r"(ch));
+			++argv_addr;
+			++i;
+			putChar(ch);
+		}while(ch);
+		putChar('\n');
+		asm volatile("movl %0, %%ebx"::"m"(argv_addr));
+		asm volatile("movb $0 ,%es:(%ebx)");
+		++argv_addr;
+		while((uint32_t)argv_addr%4)++argv_addr;
+		argv_addr+=0x10;
+	}
+	loadelf(secstart,secnum,va_to_pa(0),&entry);
+	// build argv in user stack 
+	if(argNum){
+		uint32_t oldArgNum = argNum;
+		uint32_t  arg_value;
+		while(argNum){
+			arg_value = argv[--argNum];
+			sf -> esp -= 4;
+			asm volatile("movl %0, %%ebx"::"m"(sf->esp));
+			asm volatile("movl %0,%%es:(%%ebx)"::"r"(arg_value));
+		}
+		sf -> esp -= 4;
+		asm volatile("movl %0, %%ebx"::"m"(sf->esp));
+		asm volatile("movl %0,%%es:(%%ebx)"::"r"(sf->esp+4));// char** argv
+		sf -> esp -= 4;
+		asm volatile("movl %0, %%ebx"::"m"(sf->esp));
+		asm volatile("movl %0,%%es:(%%ebx)"::"r"(oldArgNum));// int argc
+		sf -> esp -= 4;
+		asm volatile("movl %0, %%ebx"::"m"(sf->esp));
+		asm volatile("movl $0xffffffff,%es:(%ebx)");// fake ret addr
+	}
 #else
 	if(pcb[current].copyNum != 0){
 		putStr("The process still has children using its copy, can't exec()\n");
 		sf->eax = -1;
 		return;
 	}
+	// store argv
+	for(int i = 0;i<argNum;i++)	argv[i] = argBase[i];
+	//fresh Page Table and TLB
+	freshPageFrame(current,0);
 	do_exit(current);
 	pcb[current].active_mm = current;
 	pcb[current].state = STATE_RUNNING;
@@ -465,12 +522,27 @@ void syscallExec(struct StackFrame *sf) {
 	allocateStack(current);
 	freshPageFrame(current, 0);
 	sf->esp = NR_PAGES_PER_PROC*PAGE_SIZE - 0x10; // spare some space for safety
+	if(argNum){
+		uint32_t  arg_value;
+		while(argNum){
+			sf->esp -= 4;
+			arg_value = argv[--argNum];
+			asm volatile("movl %0, %%ebx"::"m"(arg_value));
+			asm volatile("movl %%ebx,(%0)"::"r"(sf->esp));
+		}
+		asm volatile("movl %0, %%ebx"::"m"(sf->esp));
+		sf->esp -= 4;
+		asm volatile("movl %%ebx,(%0)"::"r"(sf->esp));// char** argv
+		sf->esp -= 4;
+		asm volatile("movl %0, %%ebx"::"m"(argNum));
+		asm volatile("movl %%ebx,(%0)"::"r"(sf->esp));// int argc
+	}
 #endif
-	sf->eax = 0;
 	sf->eflags = sf->eflags | 0x200;
 	sf->eip = entry;
 	pcb[current].stackTop = (uint32_t)&(pcb[current].regs);
-	putStr("loadelf() should not be optimized.\n"); 
+	//putStr("loadelf() should not be optimized.\n");
+	eax_get_eip();
 }
 
 void syscallSleep(struct StackFrame *sf){
@@ -518,22 +590,28 @@ void syscallThreadCreate(struct StackFrame *sf){
 	*(uint32_t*)sf->ecx = i;	
 	pcb[i].regs.eip = sf->edx;
 	//build argv
-	pcb[i].regs.esp = NR_PAGES_PER_PROC*PAGE_SIZE- 0x10;
-	int cow = copyOnWrite(i, pcb[i].regs.esp);
-	if(cow == -1){
-		putStr("Copy-On-Write goes wrong in pthread_create.\n");
-		sf->eax = -1;
-		return;
+	pcb[i].regs.esp = sf->esp;
+	uint esp_frame = (sf->esp&0x000ff000)>>12;
+	for(int i = 0xff;i>=esp_frame;i++){
+		int cow = copyOnWrite(i, pcb[i].regs.esp);
+		if(cow == -1){
+			putStr("Copy-On-Write goes wrong in pthread_create.\n");
+			sf->eax = -1;
+			return;
+		}
+		pageFrame.content[0x200 + i].val = pcb[i].pageTb[i].val;
 	}
-	pageFrame.content[0x2ff].val = pcb[i].pageTb[0xff].val;
 	uint32_t argNum  = sf->ebx;
+	assert(argNum<=16);
+	pcb[i].regs.esp -= (4 * argNum+1);
 	uint32_t* argvSrc = (uint32_t*)sf->esi;
-	uint32_t* argvDst = (uint32_t*)(0x200000 + pcb[i].regs.esp - 4 * argNum);
+	uint32_t* argvDst = (uint32_t*)(0x200000 + pcb[i].regs.esp);
 	//fresh Page Table and TLB
 	freshPageFrame(current,0);
 	for (int i = 0;i<argNum;i++){
 		argvDst[i] = argvSrc[i]; 
 	}
+	argvDst[argNum] = 0xffffffff; // fake ret addr
 	pageFrame.content[0x2ff].val = 0;
 	pcb[i].stackTop = (uint32_t)&(pcb[i].regs);
 	pcb[i].state = STATE_RUNNABLE;

@@ -10,7 +10,7 @@ os.img:
 	@cd app_print; make
 	@cd app_exp; make
 	cat bootloader/bootloader.bin kernel/kMain.elf app/uMain.elf app_print/app_print.elf app_exp/app_exp.elf> os.img
-	#   bootloader从0扇区开始，kernel从1扇区开始，app1从201扇区开始，app2从221扇区开始。注意阅读各种makefile！！！
+	#   bootloader从0扇区开始，kernel从1扇区开始，app1从201扇区开始，app2从231扇区开始。注意阅读各种makefile！！！
 play: os.img
 	$(QEMU) -serial stdio os.img
 

@@ -1,7 +1,7 @@
 #ifndef __X86_MEMORY_H__
 #define __X86_MEMORY_H__
 
-//#define PAGE_ENABLED
+#define PAGE_ENABLED
 
 #define DEBUG
 
@@ -33,6 +33,8 @@
 	#define NR_PAGES_PER_PROC 0x100
 
 	#define PAGE_DESC_BUILD(desc, p,rw,us,base) (desc| p | (rw<<1) | (us<<2) | (base&0xfffff000))
+	#define pf_to_pa(pf) (PAGE_START+pf*PAGE_SIZE)
+	#define PAGE_START 0x100000
 #else
 	#define NR_SEGMENTS      10           // GDT size
 #endif
@@ -132,6 +134,7 @@ struct ProcessTable {
 #endif
 
 #ifdef  PTHREAD_ENABLED
+	// Next 3 members should not be copied when create a thread. 
 	int join_pid;
 	int join_retval;
 	int waiter_pid;

@@ -22,13 +22,13 @@ int uEntry(void) {
 			//sleep(1);
 			sleep(60);
 		}
-// app_exp in disk 241-260. Test exec with argument and kernel thread library.
+// app_exp in disk 261-290. Test exec with argument and kernel thread library.
 #ifdef TEST_PTHREAD
-		exec(241, 20, 1, "Test kernel thread library.\n");
+		exec(261, 30, 1, "It's an argument for exec(), test exec() with argument.\n");
 #elif defined TEST_EXEC
-		exec(241, 20, 0); //argc
+		exec(231, 30, 0); //argc
 #else
-		exec(221, 20, 0);
+		exec(231, 30, 0);
 #endif
 		exit(0);
 	}

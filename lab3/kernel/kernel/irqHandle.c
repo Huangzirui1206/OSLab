@@ -30,6 +30,8 @@ extern void allocateStack(uint32_t pid);
 extern void clearPageTable(uint32_t pid);
 extern void freshPageFrame(int pid, int proc);
 extern void copyPageFrame(int src_pid, int dst_pid, int pf);
+extern int freePageDequeue();
+extern void busyPageEnqueue(int* busyPageFrameFirst, int pg);
 extern PageFrame pageDir; 
 extern PageFrame pageFrame;
 #endif
@@ -135,7 +137,7 @@ static void pageTableReadOnly(uint32_t pid){
 #endif
 #ifdef PTHREAD_ENABLED
 static void stackPageTableReadOnly(uint32_t pid){
-	for(int i=NR_PAGES_PER_PROC - STACK_SIZE;i<NR_PAGES_PER_PROC;i++){
+	for(int i=NR_PAGES_PER_PROC - STACK_SIZE/PAGE_SIZE;i<NR_PAGES_PER_PROC;i++){
 		pcb[pid].pageTb[i].real_rw = pcb[pid].pageTb[i].rw;
 		pcb[pid].pageTb[i].rw = 0;
 	}
@@ -207,7 +209,7 @@ void GProtectFaultHandle(struct StackFrame *sf) {
 #define pf_error_info(eip,pid,error)\
 putStr("#PF(");\
 putNumX(error);\
-putStr(") at eip: ");\
+putStr(") at fault address: ");\
 putNumX(eip);\
 putStr(" in process ");\
 putNum(pid);\
@@ -462,22 +464,22 @@ void syscallExec(struct StackFrame *sf) {
 		}
 	}
 	sf->esp = SEG_SIZE - 0x10; // spare some space for safety
-	// copy argv to new stack after exec
+	// copy argv to new memory after exec
 	char* str;
 	char* argv_addr = (char*)(SEG_SIZE/2);
 	char ch = '\0';
 	for(int i = 0;i<argNum;i++){
 		str = (char*)argv[i];
 		argv[i] = (uint32_t)argv_addr;
+		int j = 0;
 		do{
-			asm volatile("movb %%es:(%1), %0":"=r"(ch):"r"(str+i));
+			asm volatile("movb %%es:(%1), %0":"=r"(ch):"r"(str+j));
 			asm volatile("movl %0, %%ebx"::"m"(argv_addr));
 			asm volatile("movb %0,%%es:(%%ebx)"::"r"(ch));
 			++argv_addr;
-			++i;
-			putChar(ch);
+			++j;
+			putChar(ch); // Avoid optimize the asm part, maybe change O2 to O0 in Makefile can also work.
 		}while(ch);
-		putChar('\n');
 		asm volatile("movl %0, %%ebx"::"m"(argv_addr));
 		asm volatile("movb $0 ,%es:(%ebx)");
 		++argv_addr;
@@ -507,42 +509,76 @@ void syscallExec(struct StackFrame *sf) {
 	}
 #else
 	if(pcb[current].copyNum != 0){
-		putStr("The process still has children using its copy, can't exec()\n");
+		putStr("The process still has children using its copy, can't exec. (This part has not been implemented)\n");
 		sf->eax = -1;
 		return;
 	}
+#ifdef PTHREAD_ENABLED
+	if(pcb[current].join_pid != -1){
+		putStr("The process still has thread using its copy, can't exec. (This part has not been implemented)\n");
+		sf->eax = -1;
+		return;
+	}
+#endif
 	// store argv
 	for(int i = 0;i<argNum;i++)	argv[i] = argBase[i];
+	// copy argv to new memory after exec
+	int argv_pf = freePageDequeue();
+	pageFrame.content[0x250].val = PAGE_DESC_BUILD(0,1,1,1,pf_to_pa(argv_pf));
 	//fresh Page Table and TLB
 	freshPageFrame(current,0);
+	char* dst= (char*)0x250000;
+	char* src;
+	char ch = '\0';
+	for(int i = 0;i<argNum;i++){
+		src = (char*)argv[i];
+		argv[i] = (uint32_t)dst - 0x200000;
+		int j = 0;
+		do{
+			ch = src[j];
+			dst[j] = ch;
+			j++;
+		}while(ch);
+		dst[j] = '\0';
+		while(j%4)++j; 
+		dst += j;
+	}
 	do_exit(current);
+	current = freeDequeue();
 	pcb[current].active_mm = current;
 	pcb[current].state = STATE_RUNNING;
 	loadelf(secstart,secnum,current,&entry); 
 	allocateStack(current);
+	busyPageEnqueue(&pcb[current].busyPageFrameFirst,argv_pf);
+	pcb[current].procSize += PAGE_SIZE;
+	pcb[current].pageTb[0x50].val = PAGE_DESC_BUILD(0,1,1,1,pf_to_pa(argv_pf));
+	pageFrame.content[0x250].val = 0;
 	freshPageFrame(current, 0);
 	sf->esp = NR_PAGES_PER_PROC*PAGE_SIZE - 0x10; // spare some space for safety
 	if(argNum){
+		uint32_t oldArgNum = argNum;
 		uint32_t  arg_value;
 		while(argNum){
 			sf->esp -= 4;
 			arg_value = argv[--argNum];
-			asm volatile("movl %0, %%ebx"::"m"(arg_value));
-			asm volatile("movl %%ebx,(%0)"::"r"(sf->esp));
+			asm volatile("movl %0, %%ebx"::"m"(sf->esp));
+			asm volatile("movl %0, (%%ebx)"::"r"(arg_value));
 		}
+		sf->esp -= 4;
 		asm volatile("movl %0, %%ebx"::"m"(sf->esp));
+		asm volatile("movl %0,(%%ebx)"::"r"(sf->esp + 4));// char** argv
 		sf->esp -= 4;
-		asm volatile("movl %%ebx,(%0)"::"r"(sf->esp));// char** argv
+		asm volatile("movl %0, %%ebx"::"m"(sf->esp));
+		asm volatile("movl %0, (%%ebx)"::"r"(oldArgNum));// int argc
 		sf->esp -= 4;
-		asm volatile("movl %0, %%ebx"::"m"(argNum));
-		asm volatile("movl %%ebx,(%0)"::"r"(sf->esp));// int argc
+		asm volatile("movl %0, %%ebx"::"m"(sf->ebp));
+		asm volatile("movl $0xffffffff, (%ebx)"); // fake ret addr
 	}
 #endif
 	sf->eflags = sf->eflags | 0x200;
 	sf->eip = entry;
 	pcb[current].stackTop = (uint32_t)&(pcb[current].regs);
 	//putStr("loadelf() should not be optimized.\n");
-	eax_get_eip();
 }
 
 void syscallSleep(struct StackFrame *sf){
@@ -574,15 +610,16 @@ void syscallThreadCreate(struct StackFrame *sf){
 #elif defined PTHREAD_ENABLED
 	//search for free pcb, if there is not, return -1 to father process
 	int i=freeDequeue();
-	sf->eax = i;
+	sf->eax = 0;
 	if(i==-1){
 		sf->eax = -1;
 		return;
 	}
 	// copy_on_write
 	stackPageTableReadOnly(current);
-	memcpy(&pcb[i],&pcb[current],sizeof(ProcessTable) - 4 * sizeof(int));
+	memcpy(&pcb[i],&pcb[current],sizeof(ProcessTable) - 7 * sizeof(int));
 	pcb[i].active_mm = current;
+	pcb[i].join_pid = -1;
 	pcb[current].copyNum +=1; 
 	// return 0 to thread
 	pcb[i].regs.eax = 0;
@@ -590,28 +627,32 @@ void syscallThreadCreate(struct StackFrame *sf){
 	*(uint32_t*)sf->ecx = i;	
 	pcb[i].regs.eip = sf->edx;
 	//build argv
-	pcb[i].regs.esp = sf->esp;
-	uint esp_frame = (sf->esp&0x000ff000)>>12;
-	for(int i = 0xff;i>=esp_frame;i++){
-		int cow = copyOnWrite(i, pcb[i].regs.esp);
-		if(cow == -1){
-			putStr("Copy-On-Write goes wrong in pthread_create.\n");
-			sf->eax = -1;
-			return;
-		}
-		pageFrame.content[0x200 + i].val = pcb[i].pageTb[i].val;
-	}
 	uint32_t argNum  = sf->ebx;
 	assert(argNum<=16);
-	pcb[i].regs.esp -= (4 * argNum+1);
+	pcb[i].regs.esp = sf->esp;
+	uint32_t esp_frame = (sf->esp&0x000ff000)>>12;
+	if((sf->esp&0x00000fff)<4 * (argNum+1)){
+		--esp_frame;
+		pcb[i].regs.esp = (esp_frame<<12) + 0xff0;
+	}
+	int cow = copyOnWrite(i, pcb[i].regs.esp);
+	if(cow == -1){
+		putStr("Copy-On-Write goes wrong in pthread_create.\n");
+		sf->eax = -1;
+		return;
+	}
+	pageFrame.content[0x200 + esp_frame].val = pcb[i].pageTb[esp_frame].val;
+	pcb[i].regs.esp -= 4 * (argNum+1);
 	uint32_t* argvSrc = (uint32_t*)sf->esi;
 	uint32_t* argvDst = (uint32_t*)(0x200000 + pcb[i].regs.esp);
 	//fresh Page Table and TLB
-	freshPageFrame(current,0);
+	putStr("To fresh TLB, reset cr3\n");
+	asm volatile("movl %0,%%eax":"=m"(tss.cr3));
+	asm volatile("movl %eax, %cr3");
+	argvDst[0] = 0xffffffff; // fake ret addr
 	for (int i = 0;i<argNum;i++){
-		argvDst[i] = argvSrc[i]; 
+		argvDst[i + 1] = argvSrc[i]; 
 	}
-	argvDst[argNum] = 0xffffffff; // fake ret addr
 	pageFrame.content[0x2ff].val = 0;
 	pcb[i].stackTop = (uint32_t)&(pcb[i].regs);
 	pcb[i].state = STATE_RUNNABLE;
@@ -633,9 +674,11 @@ void syscallThreadExit(struct StackFrame *sf){
 	if(waiter_pid>0&&waiter_pid<MAX_PCB_NUM){
 		assert(pcb[waiter_pid].state==STATE_BLOCKED);
 		pcb[waiter_pid].join_retval = sf->ecx;
+		pcb[waiter_pid].join_pid = -1;
 		runnableEnqueue(waiter_pid);
 	}
 	sf->eax = 0;
+	--pcb[pcb[current].active_mm].copyNum;
 	// do exit
 	do_exit(current);
 	// Switch proc, int $0x20 is actually better, but here we won't run into nexted interrupt.
@@ -651,7 +694,7 @@ void syscallThreadJoin(struct StackFrame *sf){
 #ifdef PTHREAD_ENABLED
 	int join_pid = sf->ecx;
 	// handle thread_join failure
-	if(join_pid!=STATE_RUNNABLE&&join_pid!=STATE_BLOCKED){
+	if(pcb[join_pid].state!=STATE_RUNNABLE&&pcb[join_pid].state!=STATE_BLOCKED){
 		//join failed
 		sf->eax = -1;
 		return;
@@ -663,10 +706,11 @@ void syscallThreadJoin(struct StackFrame *sf){
 	}
 	// set join information
 	pcb[current].join_pid = join_pid;
+	pcb[join_pid].waiter_pid = current;
 	pcb[current].state = STATE_BLOCKED;
 	pcb[current].timeCount = 0;
 	asm volatile ("int $0x20"); // To  handle nested interrupt, and switch process
-	*(uint32_t*)sf->edx = pcb[current].join_pid;
+	*(uint32_t*)sf->edx = pcb[current].join_retval;
 	sf->eax = 0;
 #else	
 	sf->eax = -1;

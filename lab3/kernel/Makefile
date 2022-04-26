@@ -3,7 +3,7 @@ LD = ld
 
 CFLAGS = -m32 -march=i386 -static \
 	 -fno-builtin -fno-stack-protector -fno-omit-frame-pointer \
-	 -Wall -Werror -O2 -I./include
+	 -Wall -Werror -O0 -I./include
 ASFLAGS = -m32
 LDFLAGS = -m elf_i386
 

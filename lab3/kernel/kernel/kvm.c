@@ -5,8 +5,6 @@ SegDesc gdt[NR_SEGMENTS];       // the new GDT, NR_SEGMENTS=10, defined in x86/m
 // Once open macro  TABLE_ENABLE, the NR_SEGMENTS is 6
 TSS tss;
 #ifdef PAGE_ENABLED
-#define PAGE_START 0x100000
-#define pf_to_pa(pf) (PAGE_START+pf*PAGE_SIZE)
 #define nr_pageFrame  (MAX_PCB_NUM*(MAX_PROC_SIZE/PAGE_SIZE))
 
 	int freePageFrameNxt[nr_pageFrame];
@@ -44,13 +42,13 @@ int freeFirst;
 int freeNxt[MAX_PCB_NUM]; //for allocating free pcb to a new precess
 
 #ifdef PAGE_ENABLED
-	static void freePageEnqueue(int pg){
+	void freePageEnqueue(int pg){
 		assert(pg>=0&&pg<nr_pageFrame);
 		freePageFrameNxt[pg] = freePageFrameFirst;
 		freePageFrameFirst = pg;
 	}
 
-	static int freePageDequeue(){
+	int freePageDequeue(){
 		int oriFirst = freePageFrameFirst;
 		if(freePageFrameFirst != -1)freePageFrameFirst = freePageFrameNxt[freePageFrameFirst];
 		return oriFirst;
@@ -87,7 +85,6 @@ void allocatePageFrame(uint32_t pid, uint32_t vaddr, uint32_t size, uint32_t rw)
 		busyPageEnqueue(&pcb[pid].busyPageFrameFirst,pf);
 		pcb[pid].pageTb[vaddr + i].val = PAGE_DESC_BUILD(0,1,rw,1,pf_to_pa(pf));
 		pcb[pid].procSize += PAGE_SIZE;
-
 	}
 	freePageFrameCnt -= cnt;
 }
@@ -388,9 +385,9 @@ int loadelf(uint32_t Secstart, uint32_t Secnum,uint32_t pid,uint32_t *entry){
 uint32_t loadUMain(){
 	uint32_t entry = 0;
 #ifndef PAGE_ENABLED
-	loadelf(201, 20, 0x200000, &entry);
+	loadelf(201, 30, 0x200000, &entry);
 #else
-	loadelf(201,20,1,&entry);
+	loadelf(201,30,1,&entry);
 #endif
 	putStr("loadelf() should not be optimized.\n"); 
 	//额外的运算会让编译器放弃优化这个函数，注释此行可以重现bug

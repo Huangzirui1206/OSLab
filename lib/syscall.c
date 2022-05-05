@@ -481,6 +481,10 @@ int str2Hex(int *hex, char *buffer, int size, int *count) {
 			}
 			else
 				return -1;
+			if(buffer[*count] == '\0') {
+				*hex=integer;
+				return 0;
+			}
 		}
 		else if(state==3){
 			if(buffer[*count]>='0' && buffer[*count]<='9'){

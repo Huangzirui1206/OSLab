@@ -400,7 +400,8 @@ void syscallReadStdIn(struct StackFrame *sf) {
 				}
 			}
 		} while (character!='\n');
-		sf->eax = i+1;
+		asm volatile("movb $0, %%es:(%0)"::"r"(str + i));
+		sf->eax = i + 1;
 		dev[STD_IN].value++;
 	}
 	else if(dev[STD_IN].value>0){

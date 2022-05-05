@@ -2,7 +2,7 @@
 #include "types.h"
 #define N 5
 
-//#define test0
+#define test0
 //#define test_Phi
 //#define test_PC
 /*default read-first, set WRITE_FIRST can change to write first*/

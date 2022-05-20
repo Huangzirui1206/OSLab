@@ -5,7 +5,7 @@
 void kEntry(void) {
 
 	// Interruption is disabled in bootloader
-
+	
 	initSerial();// initialize serial port
 	initIdt(); // initialize idt
 	initIntr(); // iniialize 8259a

@@ -21,13 +21,20 @@ int ls(char *destFilePath) {
 	DirEntry *dirEntry = 0;
 	uint8_t buffer[512 * 2];
 	fd = open(destFilePath, O_READ | O_DIRECTORY);
-	if (fd == -1)
+	if (fd == -1){
+		printf("Open file failed.\n");
 		return -1;
+	}
 	ret = read(fd, buffer, 512 * 2);
-	while (ret != 0) {
+	while (ret != 0 && ret != -1) {
 		// TODO: ls
-		// Hint: 使用 DIrEntry
-
+		// Hint: 使用 DirEntry
+		dirEntry = (DirEntry*)buffer;
+		for(i = 0;i<512*2/sizeof(DirEntry);i++){
+			if(dirEntry[i].inode == 0)continue;
+			else printf("%s   ",dirEntry[i].name);
+		}
+		ret = read(fd, buffer, 512 * 2);
 	}
 	printf("\n");
 	close(fd);
@@ -35,18 +42,21 @@ int ls(char *destFilePath) {
 }
 
 int cat(char *destFilePath) {
+	while(*destFilePath == ' ') destFilePath++;
 	printf("cat %s\n", destFilePath);
 	int fd = 0;
 	int ret = 0;
-	uint8_t buffer[512 * 2];
+	uint8_t buffer[512 * 2 + 1];
 	fd = open(destFilePath, O_READ);
 	if (fd == -1)
 		return -1;
 	ret = read(fd, buffer, 512 * 2);
-	while (ret != 0) {
+	while (ret != 0 && ret != -1) {
 		// TODO: cat
 		//把内容读到buffer，输出...
-
+		buffer[512 * 2] = '\0';
+		printf("%s",buffer);
+		ret = read(fd, buffer, 512 * 2);
 	}
 	close(fd);
 	return 0;
@@ -70,10 +80,10 @@ int uEntry(void) {
 	}
 	close(fd);
 	ls("/usr/");
-	cat("/usr/test");
+	cat(" /usr/test");
 	printf("\n");
 	printf("rm /usr/test\n");
-	remove("/usr/test");
+	remove(" /usr/test");
 	ls("/usr/");
 	printf("rmdir /usr/\n");
 	remove("/usr");

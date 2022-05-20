@@ -56,6 +56,7 @@ int32_t syscall (int num, uint32_t a1,uint32_t a2,
 }
 
 int open (char *path, int flags) {
+	while(*path == ' ') path++;
 	return syscall(SYS_OPEN, (uint32_t)path, (uint32_t)flags, 0, 0, 0);
 }
 //syscall(eax, ecx, edx, ebx ...)
@@ -82,6 +83,7 @@ int close (int fd) {
 
 int remove (char *path) {
 	//DONE: Complete the function 'remove' just like the function 'open'.
+	while(*path == ' ')path++;
 	return syscall(SYS_REMOVE, (uint32_t)path, 0, 0, 0, 0);
 }
 

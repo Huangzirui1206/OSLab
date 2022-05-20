@@ -179,6 +179,5 @@ uint32_t loadUMain(void) {
 	for (i = 0; i < 200 * 512; i ++) {
 		*(uint8_t *)(elf + i) = *(uint8_t *)(elf + i + offset);
 	}
-
 	return uMainEntry;
 }

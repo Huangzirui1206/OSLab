@@ -1186,7 +1186,6 @@ int mkdir (const char *driver, const char *destDirPath) {
 	if (cond == 1)
 		*((char*)destDirPath + length - 1) = '/';
 	printf("mkdir %s\n", destDirPath);
-	printf("dir %s inode is :%d\n",destDirPath,destInodeOffset);
 	printf("MKDIR success.\n%d inodes and %d data blocks available.\n", superBlock.availInodeNum, superBlock.availBlockNum);
 	fclose(file);
 	return 0;
@@ -1325,7 +1324,6 @@ int cp (const char *driver, const char *srcFilePath, const char *destFilePath) {
 	ret = allocInode(file, &superBlock, groupDesc, // safe operation, none of the parameters would be modified if it fails
 		&fatherInode, fatherInodeOffset,
 		&destInode, &destInodeOffset, destFilePath + size + 1, REGULAR_TYPE);
-	printf("cp in genFS func.c, destInodeOffset:%x\n",destInodeOffset);
 	if (ret == -1) {
 		printf("Failed to allocate inode.\n");
 		fclose(file);

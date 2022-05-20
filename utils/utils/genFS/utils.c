@@ -1,5 +1,5 @@
-#include "common.h"
-#include "device.h"
+#include <stdlib.h>
+#include "utils.h"
 
 /*
 * find the first token in string
@@ -86,16 +86,6 @@ int stringCpy (const char *srcString, char *destString, int size) {
 			break;
 	}
 	destString[i] = 0;
-	return 0;
-}
-
-int MemCpy(const uint8_t* src,uint8_t* dst,int size){
-	if(src==NULL || dst==NULL)return -1;
-	int i=0;
-	while(i<size){
-		dst[i]=src[i];
-		i++;
-	}
 	return 0;
 }
 

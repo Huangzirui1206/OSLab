@@ -1,6 +1,8 @@
 QEMU = qemu-system-i386
 
 os.img:
+	chmod +x utils/genBoot.pl
+	chmod +x utils/genKernel.pl
 	@cd utils/genFS; make
 	@cd bootloader; make
 	@cd kernel; make
